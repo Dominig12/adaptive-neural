@@ -1,7 +1,7 @@
 const $ = id => document.getElementById(id);
 const netCanvas = $('neural'), worldCanvas = $('world'), chartCanvas = $('chart');
 const ctx = netCanvas.getContext('2d'), worldCtx = worldCanvas.getContext('2d'), chartCtx = chartCanvas.getContext('2d');
-let graph = {nodes:[], edges:[], activities:[], version:-1}, world = null, paused = false, speed = 1;
+let graph = {nodes:[], edges:[], activities:[], inputs:[], outputs:[], structures:[], version:-1}, world = null, paused = false, speed = 1;
 let history = [], inflight = false, lastFrame = 0;
 let view = {scale:1, x:0, y:0}, drag = null;
 let lastWorld = {x:0, y:0}, trail = [];
@@ -26,6 +26,19 @@ function drawNetwork() {
   const {w,h}=resizeCanvas(netCanvas,ctx);ctx.clearRect(0,0,w,h);drawGrid(ctx,w,h,38);
   const {radius,ox,oy}=networkTransform(w,h), nodes=graph.nodes, acts=graph.activities;
   if(!nodes.length){ctx.fillStyle='#8197aa';ctx.font='13px system-ui';ctx.fillText('Получение топологии…',20,34);return;}
+  // Newly differentiated functional structures are shown as translucent regions.
+  for(const structure of graph.structures){
+    if(structure.parentId===null) continue;
+    const members=nodes.filter(n=>n.group===structure.id);
+    if(!members.length)continue;
+    let sx=0,sy=0;for(const n of members){sx+=n.x;sy+=n.y;}
+    const cx=sx/members.length,cy=sy/members.length;
+    let range=0.08;for(const n of members)range=Math.max(range,Math.hypot(n.x-cx,n.y-cy)+.04);
+    const rx=ox+cx*radius,ry=oy+cy*radius;
+    ctx.beginPath();ctx.arc(rx,ry,range*radius,0,Math.PI*2);
+    ctx.fillStyle='rgba(171,123,235,.055)';ctx.fill();ctx.strokeStyle='rgba(180,142,240,.42)';ctx.lineWidth=1.2;ctx.stroke();
+    ctx.font='10px system-ui';ctx.fillStyle='#c1a5fb';ctx.fillText(`Ансамбль ${structure.id}`,rx+5,ry-range*radius-5);
+  }
   const maxEdges=5500, stride=Math.max(1,Math.ceil(graph.edges.length/maxEdges));
   ctx.lineWidth=.8;
   for(let i=0;i<graph.edges.length;i+=stride){
@@ -84,12 +97,16 @@ async function poll(){
   try{
     const response=await fetch(`/api/snapshot?version=${graph.version}`,{cache:'no-store'});if(!response.ok)throw new Error(`HTTP ${response.status}`);
     const state=await response.json(),n=state.network;
-    if(n.nodes){graph.nodes=n.nodes;graph.edges=n.edges||[];graph.version=n.topologyVersion;}
+    if(n.nodes){graph.nodes=n.nodes;graph.edges=n.edges||[];graph.inputs=n.inputs||[];graph.outputs=n.outputs||[];graph.structures=n.structures||[];graph.version=n.topologyVersion;updateEvolutionInspector();}
     graph.activities=n.activities;world=state.world;paused=state.paused;speed=state.speed;
     $('play').textContent=paused?'Пуск':'Пауза';$('speed').value=String(speed);
     $('m-neurons').textContent=n.metrics.neurons.toLocaleString('ru-RU');$('m-born').textContent=`+${n.metrics.births} новых`;
     $('m-connections').textContent=n.metrics.connections.toLocaleString('ru-RU');$('m-pruned').textContent=`${n.metrics.prunedConnections} удалено`;
     $('m-activity').textContent=n.metrics.meanActivity.toFixed(3);$('m-stress').textContent=n.metrics.meanStress.toFixed(3);$('m-steps').textContent=n.metrics.steps.toLocaleString('ru-RU');
+    $('m-ports').textContent=`${n.metrics.inputPorts} / ${n.metrics.outputPorts}`;
+    $('m-port-births').textContent=`+${n.metrics.inputBirths} / +${n.metrics.outputBirths} · ${n.metrics.retiredPorts} отозвано`;
+    $('m-structures').textContent=String(n.metrics.structures);
+    $('m-structure-births').textContent=`+${n.metrics.structureBirths} новых`;
     $('energy').textContent=`${Math.round(world.energy*100)}%`;$('energy-bar').style.width=`${world.energy*100}%`;$('food-collected').textContent=world.foodCollected;
     if(!paused&&(!history.length||n.metrics.steps!==history[history.length-1].steps)){
       history.push({activity:n.metrics.meanActivity,stress:n.metrics.meanStress,steps:n.metrics.steps});if(history.length>220)history.shift();
@@ -108,7 +125,37 @@ function setting(id,key,digits){
   el.addEventListener('change',()=>post('/api/control',{[key]:Number(el.value)}));
 }
 setting('target','targetActivity',3);setting('learning','learningRate',4);setting('growth','growthThreshold',3);
+setting('interface-growth','interfaceGrowthThreshold',3);setting('structure-growth','structureGrowthThreshold',3);
 $('structural').addEventListener('change',e=>post('/api/control',{structuralPlasticity:e.target.checked}));
+$('adaptive-interfaces').addEventListener('change',e=>post('/api/control',{adaptiveInterfaces:e.target.checked}));
+$('adaptive-structures').addEventListener('change',e=>post('/api/control',{adaptiveStructures:e.target.checked}));
+
+function updateEvolutionInspector(){
+  $('input-ports-count').textContent=String(graph.inputs.length);
+  $('output-ports-count').textContent=String(graph.outputs.length);
+  function drawPorts(id,ports,motor){
+    const container=$(id);const rows=[];
+    for(const port of ports){
+      const row=document.createElement('div');row.className='port-row'+(port.primary?'':' new-port');
+      const name=document.createElement('strong');name.textContent=`N${port.neuronId}`;
+      const mapping=document.createElement('span');
+      mapping.textContent=motor?`→ действие ${port.physicalChannel}`:
+        (port.secondaryChannel===null?`← сенсор ${port.physicalChannel}`:`← ${port.physicalChannel} + ${port.secondaryChannel}`);
+      row.append(name,mapping);rows.push(row);
+    }
+    container.replaceChildren(...rows);
+  }
+  drawPorts('ports-in',graph.inputs,false);drawPorts('ports-out',graph.outputs,true);
+  const list=$('structures-list'),items=[];
+  for(const group of graph.structures){
+    const item=document.createElement('div');item.className='structure-item'+(group.parentId===null?'':' new-structure');
+    const title=document.createElement('strong');title.textContent=`Группа ${group.id}`;
+    const note=document.createElement('div');note.textContent=`${group.members} нейронов · ${group.parentId===null?'исходная':`из ${group.parentId} · шаг ${group.createdAt}`}`;
+    item.append(title,note);items.push(item);
+  }
+  list.replaceChildren(...items);
+}
+
 
 netCanvas.addEventListener('pointerdown',e=>{netCanvas.setPointerCapture(e.pointerId);drag={x:e.clientX,y:e.clientY,ox:view.x,oy:view.y,moved:false};});
 netCanvas.addEventListener('pointermove',e=>{if(!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(Math.abs(dx)+Math.abs(dy)>5)drag.moved=true;if(drag.moved){view.x=drag.ox+dx;view.y=drag.oy+dy;}});

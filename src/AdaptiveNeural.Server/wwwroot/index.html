@@ -10,7 +10,7 @@
 <body>
   <div class="shell">
     <header class="header">
-      <div class="identity"><span class="identity-mark">A<span>·</span>N</span><div><h1>Adaptive Neural</h1><p>Лаборатория структурной нейропластичности · прототип 0.1</p></div></div>
+      <div class="identity"><span class="identity-mark">A<span>·</span>N</span><div><h1>Adaptive Neural</h1><p>Лаборатория структурной нейропластичности · прототип 0.2</p></div></div>
       <div class="header-controls">
         <span class="connection" id="connection"><span class="dot"></span> Подключение…</span>
         <button id="play" class="button primary" type="button">Пауза</button>
@@ -27,13 +27,15 @@
       <div class="metric"><span>Средняя активность</span><strong id="m-activity">—</strong><small>нормированная 0…1</small></div>
       <div class="metric"><span>Локальное напряжение</span><strong id="m-stress">—</strong><small>отклонение от фоновой активности</small></div>
       <div class="metric"><span>Шагов модели</span><strong id="m-steps">—</strong><small>30 шагов/с при 1×</small></div>
+      <div class="metric"><span>Входы / выходы</span><strong id="m-ports">—</strong><small id="m-port-births">Виртуальные каналы</small></div>
+      <div class="metric"><span>Нейронные структуры</span><strong id="m-structures">—</strong><small id="m-structure-births">Новые ансамбли</small></div>
     </div>
 
     <main class="dashboard">
       <section class="panel neural-panel">
-        <div class="panel-title"><div><span class="eyebrow">01 / Структура</span><h2>Нейронная сеть</h2></div><div class="legend"><span><i class="c-sensor"></i> Сенсоры</span><span><i class="c-neuron"></i> Внутренние</span><span><i class="c-motor"></i> Моторы</span></div></div>
+        <div class="panel-title"><div><span class="eyebrow">01 / Структура</span><h2>Нейронная сеть</h2></div><div class="legend"><span><i class="c-sensor"></i> Сенсоры</span><span><i class="c-neuron"></i> Внутренние</span><span><i class="c-motor"></i> Моторы</span><span><i class="c-new"></i> Новые структуры</span></div></div>
         <div class="canvas-wrap neural-wrap"><canvas id="neural" aria-label="Динамический граф нейронов"></canvas><div class="canvas-tag" id="graph-indicator">ЛКМ: импульс · перетаскивание: панорама · колесо: масштаб</div><div class="canvas-corner" id="graph-zoom">100%</div></div>
-        <p class="panel-note">Нажми в области сети, чтобы создать локальный импульс. Активные группы меняют связи; при устойчивой нагрузке могут появиться новые нейроны.</p>
+        <p class="panel-note">Нажми в области сети, чтобы создать локальный импульс. При устойчивой нагрузке сеть может отделять новые ансамбли, а также создавать дополнительные входные рецепторы и моторные проекции.</p>
       </section>
       <section class="panel world-panel">
         <div class="panel-title"><div><span class="eyebrow">02 / Обратная связь</span><h2>Мир агента</h2></div><div class="world-control"><label for="spawnMode">Добавить</label><select id="spawnMode"><option value="food">Питание</option><option value="hazard">Опасность</option></select></div></div>
@@ -50,9 +52,23 @@
         <div class="slider-row"><div><label for="learning">Скорость пластичности</label><output id="learning-v">0.0030</output></div><input id="learning" type="range" min="0" max="0.03" step="0.0005" value="0.003"></div>
         <div class="slider-row"><div><label for="growth">Порог структурного роста</label><output id="growth-v">0.055</output></div><input id="growth" type="range" min="0.01" max="0.25" step="0.005" value="0.055"></div>
         <label class="switch-row"><input id="structural" type="checkbox" checked> Структурная пластичность</label>
+        <label class="switch-row"><input id="adaptive-interfaces" type="checkbox" checked> Эволюция входов и выходов</label>
+        <label class="switch-row"><input id="adaptive-structures" type="checkbox" checked> Образование новых ансамблей</label>
+        <div class="slider-row"><div><label for="interface-growth">Порог изменения интерфейсов</label><output id="interface-growth-v">0.075</output></div><input id="interface-growth" type="range" min="0.005" max="0.3" step="0.005" value="0.075"></div>
+        <div class="slider-row"><div><label for="structure-growth">Порог рождения ансамблей</label><output id="structure-growth-v">0.085</output></div><input id="structure-growth" type="range" min="0.005" max="0.3" step="0.005" value="0.085"></div>
         <div class="hint">Параметры меняются на лету. Для другого начального размера сети используй API или перезапуск.</div>
       </section>
     </div>
+    <section class="evolution-panels">
+      <section class="panel ecology"><div class="panel-title"><div><span class="eyebrow">05 / Сенсомоторная пластичность</span><h2>Эволюция интерфейсов</h2></div></div>
+        <div class="evolution-details"><div><h3>Входные рецепторы <span id="input-ports-count">8</span></h3><div id="ports-in" class="port-list"></div></div>
+          <div><h3>Моторные проекции <span id="output-ports-count">3</span></h3><div id="ports-out" class="port-list"></div></div></div>
+        <p class="panel-note">Число виртуальных каналов меняется. Новые рецепторы смешивают доступные физические сенсоры (8), а новые моторы проецируются на физические действия (3). Новые аппаратные органы здесь не возникают.</p>
+      </section>
+      <section class="panel ecology"><div class="panel-title"><div><span class="eyebrow">06 / Самоорганизация</span><h2>Рождающиеся ансамбли</h2></div></div>
+        <div id="structures-list" class="structures-list"></div><p class="panel-note">Новый ансамбль образуется отделением совместно активных нейронов с локальным нейрогенезом и связями. Это ещё не доказательство самостоятельного возникновения понятий.</p>
+      </section>
+    </section>
     <footer>Экспериментальная модель · Hebbian-пластичность · Гомеостаз · Разреженный граф · Детерминированный seed 1337</footer>
   </div>
 </body>

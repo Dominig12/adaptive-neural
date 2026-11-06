@@ -12,6 +12,13 @@ public sealed class NetworkConfig
     public float HomeostasisRate { get; set; } = 0.005f;
     public float GrowthThreshold { get; set; } = 0.055f;
     public bool StructuralPlasticity { get; set; } = true;
+    public bool AdaptiveInterfaces { get; set; } = true;
+    public bool AdaptiveStructures { get; set; } = true;
+    public int MaximumInputPorts { get; set; } = 20;
+    public int MaximumOutputPorts { get; set; } = 10;
+    public int MaximumStructures { get; set; } = 12;
+    public float InterfaceGrowthThreshold { get; set; } = 0.075f;
+    public float StructureGrowthThreshold { get; set; } = 0.085f;
 
     public NetworkConfig Clone() => (NetworkConfig)MemberwiseClone();
 }
@@ -21,11 +28,14 @@ public enum NeuronRole { Sensor, Internal, Motor }
 public sealed record NeuronView(int Id, int Group, NeuronRole Role, float X, float Y);
 public sealed record EdgeView(int From, int To, float Weight);
 public sealed record NetworkMetrics(int Neurons, int Connections, int Births, int NewConnections,
-    int PrunedConnections, float MeanActivity, float MeanStress, long Steps);
+    int PrunedConnections, float MeanActivity, float MeanStress, long Steps,
+    int InputPorts, int OutputPorts, int Structures, int InputBirths, int OutputBirths,
+    int StructureBirths, int RetiredPorts);
 public sealed record NetworkView(int TopologyVersion, float[] Activities, NeuronView[]? Nodes,
-    EdgeView[]? Edges, NetworkMetrics Metrics);
+    EdgeView[]? Edges, NetworkMetrics Metrics, InterfaceView[]? Inputs,
+    InterfaceView[]? Outputs, StructureView[]? Structures);
 
-public sealed class AdaptiveNetwork
+public sealed partial class AdaptiveNetwork
 {
     private const int SensorCount = 8;
     private const int MotorCount = 3;
@@ -87,9 +97,13 @@ public sealed class AdaptiveNetwork
         Config.InitialNeurons = Math.Clamp(Config.InitialNeurons, SensorCount + MotorCount + 8, Config.MaximumNeurons);
         Config.MaximumEdges = Math.Clamp(Config.MaximumEdges, 256, 64000);
         Config.MaximumOutgoing = Math.Clamp(Config.MaximumOutgoing, 2, 64);
+        Config.MaximumInputPorts = Math.Clamp(Config.MaximumInputPorts, SensorCount, 64);
+        Config.MaximumOutputPorts = Math.Clamp(Config.MaximumOutputPorts, MotorCount, 32);
+        Config.MaximumStructures = Math.Clamp(Config.MaximumStructures, 4, 32);
         _incoming = new float[Config.MaximumNeurons];
         _random = new Random(Config.Seed);
         Initialize();
+        InitializeEvolution();
     }
 
     private void Initialize()
@@ -200,8 +214,7 @@ public sealed class AdaptiveNetwork
                 _incoming[edge.To] += from.Activity * edge.Weight;
             }
         }
-        for (int i = 0; i < SensorCount; i++)
-            _incoming[_sensorIds[i]] += Math.Clamp(float.IsFinite(sensors[i]) ? sensors[i] : 0f, 0f, 3f);
+        DriveInputPorts(sensors);
 
         for (int p = _pulses.Count - 1; p >= 0; p--)
         {
@@ -255,13 +268,18 @@ public sealed class AdaptiveNetwork
 
         if (Config.StructuralPlasticity && Steps % 90 == 0) AdaptStructure();
         if (Config.StructuralPlasticity && Steps % 360 == 0) Prune();
+        if (Config.StructuralPlasticity) RetireInactivePorts();
     }
 
     private void AdaptStructure()
     {
         // Local, activity-driven structural mutations. Group labels are spatial scaffolds,
         // not fixed cognitive roles. Growth is capped to prevent runaway resource use.
-        for (int group = 1; group <= 4; group++)
+        // Snapshot the group IDs: splitting a group must not mutate this iteration.
+        int[] groupIds = _structures.Keys.ToArray();
+        bool evolvedInterfaces = false;
+        bool formedStructure = false;
+        foreach (int group in groupIds)
         {
             float pressure = 0f, average = 0f;
             int members = 0, focal = -1;
@@ -298,6 +316,12 @@ public sealed class AdaptiveNetwork
                 best = d;
             }
             if (closest >= 0) TryConnect(focal, closest, InitialWeight() * 0.65f);
+            if (!evolvedInterfaces && pressure >= Config.InterfaceGrowthThreshold && Steps % 270 == 0)
+            {
+                EvolveInterfaces(focal, pressure);
+                evolvedInterfaces = true;
+            }
+            if (!formedStructure && TryFormStructure(group, focal, pressure)) formedStructure = true;
 
             // Add a neuron only for persistent high pressure, at most once per group / 270 ticks.
             if (Steps % 270 != 0 || pressure < Config.GrowthThreshold * 1.4f ||
@@ -336,7 +360,7 @@ public sealed class AdaptiveNetwork
 
     public float[] ReadMotors()
     {
-        return [_neurons[_motorIds[0]].Activity, _neurons[_motorIds[1]].Activity, _neurons[_motorIds[2]].Activity];
+        return ReadOutputPorts();
     }
 
     public NetworkView Snapshot(int knownTopologyVersion)
@@ -360,6 +384,11 @@ public sealed class AdaptiveNetwork
         }
         return new NetworkView(_topologyVersion, activities, nodes, edges,
             new NetworkMetrics(_neurons.Count, _connections, _births, _linksAdded,
-                _linksPruned, MathF.Round(_meanActivity, 4), MathF.Round(_meanStress, 4), Steps));
+                _linksPruned, MathF.Round(_meanActivity, 4), MathF.Round(_meanStress, 4), Steps,
+                _inputs.Count, _outputs.Count, _structures.Count, _inputBirths, _outputBirths,
+                _structureBirths, _portsRetired),
+            nodes is null ? null : SnapshotPorts(_inputs),
+            nodes is null ? null : SnapshotPorts(_outputs),
+            nodes is null ? null : SnapshotStructures());
     }
 }
