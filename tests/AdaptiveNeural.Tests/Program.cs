@@ -83,9 +83,9 @@ var evolvedView = evolving.Snapshot(-1);
 Check(evolvedView.Inputs!.Length == evolving.InputPortCount &&
       evolvedView.Outputs!.Length == evolving.OutputPortCount, "port topology included in snapshot");
 Check(evolvedView.Structures!.Length == evolving.StructureCount, "structure topology included in snapshot");
-Check(evolvedView.Inputs.All(v => evolvedView.Nodes![v.NeuronId].Role == NeuronRole.Sensor &&
+Check(evolvedView.Inputs!.All(v => evolvedView.Nodes![v.NeuronId].Role == NeuronRole.Sensor &&
       v.PhysicalChannel is >= 0 and < 8), "all virtual inputs map to valid physical sensors");
-Check(evolvedView.Outputs.All(v => evolvedView.Nodes![v.NeuronId].Role == NeuronRole.Motor &&
+Check(evolvedView.Outputs!.All(v => evolvedView.Nodes![v.NeuronId].Role == NeuronRole.Motor &&
       v.PhysicalChannel is >= 0 and < 3), "all virtual outputs map to valid physical motors");
 Check(evolving.ReadMotors().All(v => float.IsFinite(v) && v >= 0f && v <= 1f),
     "dynamic motor readout is bounded");
