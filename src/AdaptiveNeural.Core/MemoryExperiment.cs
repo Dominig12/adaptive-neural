@@ -30,17 +30,17 @@ public static class MemoryExperiment
         var shuffled = new AdaptiveNetwork(config);
         var rng = new Random(unchecked(seed ^ 0x2BD43A));
         var series = new MemoryExperimentPoint[episodes];
-        float[] quiet = new float[8];
-        float[] familiar = new float[8];
+        float[] quiet = new float[ForagerWorld.SensorChannels];
+        float[] familiar = new float[ForagerWorld.SensorChannels];
         familiar[0] = 3f;
         familiar[1] = 3f;
 
         for (int i = 0; i < 70; i++) { repeated.Step(quiet); shuffled.Step(quiet); }
         for (int episode = 0; episode < episodes; episode++)
         {
-            float[] different = new float[8];
-            int a = rng.Next(8);
-            int b = (a + 1 + rng.Next(7)) % 8;
+            float[] different = new float[ForagerWorld.SensorChannels];
+            int a = rng.Next(ForagerWorld.SensorChannels);
+            int b = (a + 1 + rng.Next(ForagerWorld.SensorChannels - 1)) % ForagerWorld.SensorChannels;
             different[a] = 3f;
             different[b] = 3f;
             for (int i = 0; i < 14; i++) { repeated.Step(familiar); shuffled.Step(different); }

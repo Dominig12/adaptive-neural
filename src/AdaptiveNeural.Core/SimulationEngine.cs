@@ -8,9 +8,10 @@ public sealed record ControlRequest(string? Action = null, int? Speed = null, in
     int? MaximumInputPorts = null, int? MaximumOutputPorts = null,
     int? MaximumStructures = null, float? InterfaceGrowthThreshold = null,
     float? StructureGrowthThreshold = null, bool? MemoryConsolidation = null,
-    float? MemoryActivationThreshold = null, float? ConsolidationRate = null);
+    float? MemoryActivationThreshold = null, float? ConsolidationRate = null,
+    float? VisionRange = null, float? FieldOfViewDegrees = null);
 public sealed record StimulusRequest(float X, float Y, float Strength = 2.4f);
-public sealed record SpawnRequest(float X, float Y, bool Hazard = false);
+public sealed record SpawnRequest(float X, float Y, bool Hazard = false, string? Kind = null);
 
 public sealed class SimulationEngine
 {
@@ -46,6 +47,7 @@ public sealed class SimulationEngine
     {
         lock (_gate)
         {
+            _world.ConfigureVision(request.VisionRange, request.FieldOfViewDegrees);
             if (request.Speed.HasValue) _speed = Math.Clamp(request.Speed.Value, 1, 8);
             if (request.TargetActivity.HasValue && float.IsFinite(request.TargetActivity.Value))
                 _config.TargetActivity = _network.Config.TargetActivity = Math.Clamp(request.TargetActivity.Value, 0.03f, 0.65f);
@@ -60,7 +62,7 @@ public sealed class SimulationEngine
             if (request.AdaptiveStructures.HasValue)
                 _config.AdaptiveStructures = _network.Config.AdaptiveStructures = request.AdaptiveStructures.Value;
             if (request.MaximumInputPorts.HasValue)
-                _config.MaximumInputPorts = _network.Config.MaximumInputPorts = Math.Clamp(request.MaximumInputPorts.Value, 8, 64);
+                _config.MaximumInputPorts = _network.Config.MaximumInputPorts = Math.Clamp(request.MaximumInputPorts.Value, ForagerWorld.SensorChannels, 64);
             if (request.MaximumOutputPorts.HasValue)
                 _config.MaximumOutputPorts = _network.Config.MaximumOutputPorts = Math.Clamp(request.MaximumOutputPorts.Value, 3, 32);
             if (request.MaximumStructures.HasValue)
@@ -88,8 +90,10 @@ public sealed class SimulationEngine
                 case "play": _paused = false; break;
                 case "step": TickUnsafe(); _paused = true; break;
                 case "reset":
+                    float range = _world.VisionRange, angle = _world.FieldOfViewDegrees;
                     _network = new AdaptiveNetwork(_config);
                     _world = new ForagerWorld(_config.Seed);
+                    _world.ConfigureVision(range, angle);
                     _paused = true;
                     break;
             }
@@ -103,7 +107,7 @@ public sealed class SimulationEngine
 
     public void Spawn(SpawnRequest request)
     {
-        lock (_gate) _world.Spawn(request.X, request.Y, request.Hazard);
+        lock (_gate) _world.Spawn(request.X, request.Y, request.Hazard, request.Kind);
     }
 
     public SimulationView Snapshot(int topologyVersion)

@@ -15,7 +15,8 @@ Check(a.ConnectionCount < 128 * 24, "no dense quadratic network");
 Check(a.Snapshot(-1).Nodes!.Length == 128, "initial topology snapshot");
 Check(a.Snapshot(a.Snapshot(-1).TopologyVersion).Nodes is null, "topology delta omitted when version unchanged");
 
-float[] sensors = [1.4f, 0.1f, 1f, 0f, 0.8f, 0f, 0f, 0.3f];
+float[] sensors = new float[ForagerWorld.SensorChannels];
+sensors[0] = 1.4f; sensors[1] = 0.1f; sensors[2] = 1f; sensors[4] = 0.8f; sensors[10] = 0.3f;
 for (int step = 0; step < 1200; step++)
 {
     if (step % 150 == 0)
@@ -58,7 +59,7 @@ var permissive = new NetworkConfig
 };
 var evolving = new AdaptiveNetwork(permissive);
 var evolvingTwin = new AdaptiveNetwork(permissive);
-float[] highStimulus = [3f, 3f, 3f, 3f, 3f, 3f, 3f, 3f];
+float[] highStimulus = Enumerable.Repeat(3f, ForagerWorld.SensorChannels).ToArray();
 for (int i = 0; i < 1800; i++)
 {
     evolving.Step(highStimulus);
@@ -72,7 +73,7 @@ for (int i = 0; i < 1800; i++)
         CheckQuiet(evolving.ConnectionCount <= permissive.MaximumEdges, "synapse budget");
     }
 }
-Check(evolving.InputPortCount > 8, "activity-dependent virtual receptor genesis");
+Check(evolving.InputPortCount > ForagerWorld.SensorChannels, "activity-dependent virtual receptor genesis");
 Check(evolving.OutputPortCount > 3, "activity-dependent virtual effector genesis");
 Check(evolving.StructureCount > 4, "emergent structure partition and neurogenesis");
 Check(evolving.InputPortCount == evolvingTwin.InputPortCount &&
@@ -84,7 +85,7 @@ Check(evolvedView.Inputs!.Length == evolving.InputPortCount &&
       evolvedView.Outputs!.Length == evolving.OutputPortCount, "port topology included in snapshot");
 Check(evolvedView.Structures!.Length == evolving.StructureCount, "structure topology included in snapshot");
 Check(evolvedView.Inputs!.All(v => evolvedView.Nodes![v.NeuronId].Role == NeuronRole.Sensor &&
-      v.PhysicalChannel is >= 0 and < 8), "all virtual inputs map to valid physical sensors");
+      v.PhysicalChannel >= 0 && v.PhysicalChannel < ForagerWorld.SensorChannels), "all virtual inputs map to valid physical sensors");
 Check(evolvedView.Outputs!.All(v => evolvedView.Nodes![v.NeuronId].Role == NeuronRole.Motor &&
       v.PhysicalChannel is >= 0 and < 3), "all virtual outputs map to valid physical motors");
 Check(evolving.ReadMotors().All(v => float.IsFinite(v) && v >= 0f && v <= 1f),
@@ -98,7 +99,7 @@ var noPorts = new AdaptiveNetwork(new NetworkConfig
     GrowthThreshold = 0.005f, AdaptiveInterfaces = false, AdaptiveStructures = false
 });
 for (int i = 0; i < 900; i++) noPorts.Step(highStimulus);
-Check(noPorts.InputPortCount == 8 && noPorts.OutputPortCount == 3 && noPorts.StructureCount == 4,
+Check(noPorts.InputPortCount == ForagerWorld.SensorChannels && noPorts.OutputPortCount == 3 && noPorts.StructureCount == 4,
     "independent evolution toggles prevent port and structure births");
 
 // Local memory rule: one continuous pulse counts as one episode; repeated separated
@@ -143,8 +144,55 @@ Check(studyA.Series.All(p => p.RepeatedStable >= 0 && p.ShuffledStable >= 0 &&
 
 var disabled = new AdaptiveNetwork(new NetworkConfig { StructuralPlasticity = false });
 int count = disabled.ConnectionCount;
-for (int i = 0; i < 500; i++) disabled.Step(new float[8]);
+for (int i = 0; i < 500; i++) disabled.Step(new float[ForagerWorld.SensorChannels]);
 Check(disabled.ConnectionCount == count && disabled.NeuronCount == 144, "structural adaptation toggle");
+
+
+// Sensory geometry: objects outside the cone or behind a rock must not
+// stimulate a visual receptor; non-visual bodily receptors still work.
+var visibleWorld = new ForagerWorld(100, populate: false);
+visibleWorld.ConfigureVision(range: 1f, angle: 120f);
+visibleWorld.Spawn(0.60f, 0f, kind: "food");
+visibleWorld.Spawn(-0.55f, 0f, kind: "shelter");
+Check(visibleWorld.SampleSensors().Length == ForagerWorld.SensorChannels,
+    "world and neural network agree on physical input count");
+Check(visibleWorld.SampleSensors()[1] > 0f && visibleWorld.SampleSensors()[7] == 0f,
+    "directional FOV rejects objects behind agent");
+visibleWorld.Spawn(0.26f, 0f, kind: "rock");
+Check(visibleWorld.SampleSensors()[1] == 0f && visibleWorld.SampleSensors()[9] > 0f,
+    "solid rock occludes food, but is itself detected");
+Check(visibleWorld.Snapshot().Objects.Any(o => o.Kind == "food" && !o.Visible),
+    "world snapshot distinguishes visually occluded objects");
+visibleWorld.ConfigureVision(angle: 360f);
+Check(visibleWorld.SampleSensors()[6] > 0f || visibleWorld.SampleSensors()[7] > 0f ||
+    visibleWorld.SampleSensors()[8] > 0f, "wide field of view detects rear refuge");
+Check(visibleWorld.Snapshot().Objects.Length == 3,
+    "spawned object varieties survive world snapshots");
+var worldTwin1 = new ForagerWorld(22), worldTwin2 = new ForagerWorld(22);
+for (int t = 0; t < 300; t++)
+{
+    float[] action = [0.3f, 0.7f, 0.8f];
+    worldTwin1.Step(action); worldTwin2.Step(action);
+}
+var worldOne = worldTwin1.Snapshot();
+var worldTwo = worldTwin2.Snapshot();
+Check(worldOne.Equals(worldTwo) || (worldOne.X == worldTwo.X && worldOne.Y == worldTwo.Y &&
+    worldOne.Energy == worldTwo.Energy && worldOne.Daylight == worldTwo.Daylight &&
+    worldOne.Sensors.SequenceEqual(worldTwo.Sensors)), "richer environment remains seed-deterministic");
+Check(worldOne.EffectiveVisionRange <= worldOne.VisionRange &&
+    worldOne.Daylight is >= 0f and <= 1f &&
+    worldOne.Exposure is >= 0f and <= 1f &&
+    worldOne.Sensors.All(v => float.IsFinite(v) && v is >= 0f and <= 3f),
+    "light, temperature and sensory readings are bounded");
+
+var retentionA = RetentionExperiment.Run(new RetentionExperimentRequest(Seed: 777, Episodes: 10, DelaySteps: 120));
+var retentionB = RetentionExperiment.Run(new RetentionExperimentRequest(Seed: 777, Episodes: 10, DelaySteps: 120));
+Check(retentionA.Results.Length == 5 && retentionA.Results.SequenceEqual(retentionB.Results),
+    "retention study is deterministic and keeps training separate from readout");
+Check(retentionA.Results.All(v => float.IsFinite(v.PatternSeparation) &&
+    float.IsFinite(v.FamiliarDriftFromBaseline) && float.IsFinite(v.FamiliarResponse) &&
+    float.IsFinite(v.NovelResponse) && v.StableConnections >= 0),
+    "delayed-recall probes yield finite descriptive measurements");
 
 var engine = new SimulationEngine();
 var initial = engine.Snapshot(-1);
@@ -155,9 +203,14 @@ Check(engine.Snapshot(-1).Network.Metrics.Steps == 1, "pause blocks automatic ti
 engine.Apply(new ControlRequest(Action: "play", Speed: 4));
 engine.Tick();
 Check(engine.Snapshot(-1).Network.Metrics.Steps == 5, "speed multiplier");
-engine.Spawn(new SpawnRequest(0.2f, 0.2f));
-Check(engine.Snapshot(-1).World.Objects.Length == initial.World.Objects.Length + 1, "spawn resources");
+engine.Spawn(new SpawnRequest(0.2f, 0.2f, Kind: "shelter"));
+Check(engine.Snapshot(-1).World.Objects.Length == initial.World.Objects.Length + 1, "spawn additional environmental factors");
+engine.Apply(new ControlRequest(FieldOfViewDegrees: 90f, VisionRange: 0.55f));
+Check(engine.Snapshot(-1).World.FieldOfViewDegrees == 90f &&
+      MathF.Abs(engine.Snapshot(-1).World.VisionRange - 0.55f) < 0.0001f,
+      "live vision configuration updates the world");
 engine.Apply(new ControlRequest(Action: "reset"));
 Check(engine.Snapshot(-1).Network.Metrics.Steps == 0, "reset deterministic experiment");
+Check(engine.Snapshot(-1).World.FieldOfViewDegrees == 90f, "world settings persist after reset");
 
 Console.WriteLine($"\nAll checks passed. After 1200 ticks: {snapshot.Metrics.Neurons} neurons, {snapshot.Metrics.Connections} synapses, {snapshot.Metrics.Births} births, {snapshot.Metrics.PrunedConnections} pruned.");

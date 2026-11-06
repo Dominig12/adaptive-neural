@@ -10,7 +10,7 @@
 <body>
   <div class="shell">
     <header class="header">
-      <div class="identity"><span class="identity-mark">A<span>·</span>N</span><div><h1>Adaptive Neural</h1><p>Лаборатория структурной нейропластичности · прототип 0.3</p></div></div>
+      <div class="identity"><span class="identity-mark">A<span>·</span>N</span><div><h1>Adaptive Neural</h1><p>Лаборатория структурной нейропластичности · прототип 0.4</p></div></div>
       <div class="header-controls">
         <span class="connection" id="connection"><span class="dot"></span> Подключение…</span>
         <button id="play" class="button primary" type="button">Пауза</button>
@@ -39,10 +39,14 @@
         <p class="panel-note">Нажми в области сети, чтобы создать локальный импульс. При устойчивой нагрузке сеть может отделять новые ансамбли, а также создавать дополнительные входные рецепторы и моторные проекции.</p>
       </section>
       <section class="panel world-panel">
-        <div class="panel-title"><div><span class="eyebrow">02 / Обратная связь</span><h2>Мир агента</h2></div><div class="world-control"><label for="spawnMode">Добавить</label><select id="spawnMode"><option value="food">Питание</option><option value="hazard">Опасность</option></select></div></div>
+        <div class="panel-title"><div><span class="eyebrow">02 / Обратная связь</span><h2>Мир агента</h2></div><div class="world-control"><label for="spawnMode">Добавить</label><select id="spawnMode"><option value="food">Питание</option><option value="hazard">Опасность</option><option value="rock">Препятствие</option><option value="shelter">Укрытие</option></select></div></div>
         <div class="canvas-wrap world-wrap"><canvas id="world" aria-label="Двумерный мир агента"></canvas><div class="canvas-tag">Нажми, чтобы добавить объект в мир</div></div>
         <div class="world-stats"><span>Энергия <strong id="energy">—</strong></span><div class="energy-track"><div id="energy-bar"></div></div><span>Собрано <strong id="food-collected">0</strong></span></div>
-        <p class="panel-note">Сенсоры мира подают сигналы в сеть, а моторные нейроны управляют движением. Движение и сбор ресурсов ещё не означают обученного поведения.</p>
+        <div class="world-env"><span>Освещение <strong id="world-light">—</strong></span><span>Температура <strong id="world-temp">—</strong></span><span>Видимых объектов <strong id="world-visible">—</strong></span><span>Столкновений <strong id="world-collisions">—</strong></span></div>
+        <div class="world-vision"><div class="slider-row"><div><label for="vision-angle">Угол обзора</label><output id="vision-angle-v">140°</output></div><input id="vision-angle" type="range" min="40" max="360" step="10" value="140"></div>
+        <div class="slider-row"><div><label for="vision-range">Дальность зрения</label><output id="vision-range-v">0.95</output></div><input id="vision-range" type="range" min="0.25" max="1.6" step="0.05" value="0.95"></div></div>
+        <div class="world-sensor-list" id="world-sensors" aria-label="Состояние физических сенсоров"></div>
+        <p class="panel-note">12 физических каналов: пища, опасности и укрытия по трём направлениям; преграда впереди, недостаток энергии и тепловая нагрузка. Предметы за пределами обзора и за камнями не видны. Ночь уменьшает дальность зрения; укрытия снижают тепловую нагрузку. Это не обученное поведение.</p>
       </section>
     </main>
 
@@ -66,7 +70,7 @@
       <section class="panel ecology"><div class="panel-title"><div><span class="eyebrow">05 / Сенсомоторная пластичность</span><h2>Эволюция интерфейсов</h2></div></div>
         <div class="evolution-details"><div><h3>Входные рецепторы <span id="input-ports-count">8</span></h3><div id="ports-in" class="port-list"></div></div>
           <div><h3>Моторные проекции <span id="output-ports-count">3</span></h3><div id="ports-out" class="port-list"></div></div></div>
-        <p class="panel-note">Число виртуальных каналов меняется. Новые рецепторы смешивают доступные физические сенсоры (8), а новые моторы проецируются на физические действия (3). Новые аппаратные органы здесь не возникают.</p>
+        <p class="panel-note">Число виртуальных каналов меняется. Новые рецепторы смешивают доступные физические сенсоры (12), а новые моторы проецируются на физические действия (3). Новые аппаратные органы здесь не возникают.</p>
       </section>
       <section class="panel ecology"><div class="panel-title"><div><span class="eyebrow">06 / Самоорганизация</span><h2>Рождающиеся ансамбли</h2></div></div>
         <div id="structures-list" class="structures-list"></div><p class="panel-note">Новый ансамбль образуется отделением совместно активных нейронов с локальным нейрогенезом и связями. Это ещё не доказательство самостоятельного возникновения понятий.</p>
@@ -85,6 +89,13 @@
         <div class="benchmark-summary" id="memory-experiment-summary">Запусти эксперимент, чтобы сравнить число стабилизированных связей по эпизодам.</div>
         <p class="panel-note">Отчёт показывает изменения структуры памяти и отклик на знакомый стимул. Рост числа стабильных связей сам по себе не доказывает запоминание или понимание.</p>
       </section>
+    </section>
+    <section class="panel retention-panel">
+      <div class="panel-title"><div><span class="eyebrow">09 / Проверка памяти</span><h2>Узнавание после паузы и помех</h2></div><button type="button" class="button" id="run-retention-experiment">Проверить сохранение</button></div>
+      <div class="retention-controls"><label>Эпизоды <input id="retention-episodes" type="number" min="4" max="48" value="20"></label><label>Длительность отсрочки (тики) <input id="retention-delay" type="number" min="60" max="1800" step="60" value="360"></label></div>
+      <p class="benchmark-note" id="retention-status">Пять отдельных сетей с одинаковым seed: исходная, сразу после повторений, после тишины, после отвлекающих стимулов и контроль со случайными парами.</p>
+      <div class="retention-results" id="retention-results"></div>
+      <p class="panel-note">Различимость знакомого и нового паттерна измеряется по внутренней активности, а отклонение от исходной реакции — относительно необученной сети. Это описательные величины, не точность классификатора и не доказательство воспоминания.</p>
     </section>
     <footer>Экспериментальная модель · Hebbian-пластичность · Гомеостаз · Разреженный граф · Детерминированный seed 1337</footer>
   </div>

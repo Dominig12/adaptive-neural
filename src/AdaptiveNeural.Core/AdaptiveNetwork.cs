@@ -42,7 +42,7 @@ public sealed record NetworkView(int TopologyVersion, float[] Activities, Neuron
 
 public sealed partial class AdaptiveNetwork
 {
-    private const int SensorCount = 8;
+    private const int SensorCount = ForagerWorld.SensorChannels;
     private const int MotorCount = 3;
     private const float MinWeight = -1.3f;
     private const float MaxWeight = 1.3f;
@@ -208,7 +208,7 @@ public sealed partial class AdaptiveNetwork
 
     public void Step(ReadOnlySpan<float> sensors)
     {
-        if (sensors.Length != SensorCount) throw new ArgumentException("Expected eight sensor channels.", nameof(sensors));
+        if (sensors.Length != SensorCount) throw new ArgumentException("Unexpected physical sensor channel count.", nameof(sensors));
         Steps++;
         int count = _neurons.Count;
         Array.Clear(_incoming, 0, count);

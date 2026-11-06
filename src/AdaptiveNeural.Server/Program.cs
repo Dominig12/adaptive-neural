@@ -34,6 +34,12 @@ app.MapPost("/api/memory/experiment", async (MemoryExperimentRequest request) =>
     }
     finally { memoryExperimentGate.Release(); }
 });
+app.MapPost("/api/memory/retention", async (RetentionExperimentRequest request) =>
+{
+    if (!await memoryExperimentGate.WaitAsync(0)) return Results.Conflict(new { error = "Experiment already running" });
+    try { return Results.Ok(await Task.Run(() => RetentionExperiment.Run(request))); }
+    finally { memoryExperimentGate.Release(); }
+});
 app.MapGet("/api/health", () => Results.Ok(new { status = "ready" }));
 app.MapFallbackToFile("index.html");
 app.Run();

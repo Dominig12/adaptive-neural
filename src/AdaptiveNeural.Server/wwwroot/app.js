@@ -63,18 +63,36 @@ function drawWorld(){
   if(!world)return;
   const square=Math.min(w-30,h-24),scale=square/2,cx=w/2,cy=h/2;
   const point=(x,y)=>[cx+x*scale,cy+y*scale];
+  c.fillStyle=`rgba(8,18,36,${Math.max(0,(1-world.daylight)*.43)})`;
+  c.fillRect(cx-scale,cy-scale,scale*2,scale*2);
   c.strokeStyle='#36536b';c.lineWidth=1;c.strokeRect(cx-scale,cy-scale,scale*2,scale*2);
+  const [agentX,agentY]=point(world.x,world.y),half=world.fieldOfViewDegrees*Math.PI/360;
+  const radius=world.effectiveVisionRange*scale;
+  c.beginPath();c.moveTo(agentX,agentY);c.arc(agentX,agentY,radius,world.heading-half,world.heading+half);c.closePath();
+  c.fillStyle='rgba(106,194,229,.075)';c.fill();c.strokeStyle='rgba(124,203,248,.27)';c.lineWidth=1;c.stroke();
   for(const object of world.objects){
-    const [x,y]=point(object.x,object.y);c.beginPath();c.arc(x,y,object.hazard?7:5,0,Math.PI*2);
-    if(object.hazard){c.fillStyle='rgba(231,106,132,.12)';c.arc(x,y,14,0,Math.PI*2);c.fill();c.beginPath();c.arc(x,y,6,0,Math.PI*2);c.fillStyle='#eb8297';}
-    else{c.fillStyle='#64d7a4';}c.fill();
+    const [x,y]=point(object.x,object.y),r=Math.max(4,object.radius*scale);
+    c.save();c.globalAlpha=object.visible?1:.25;
+    switch(object.kind){
+      case 'rock':
+        c.fillStyle='#7790a5';c.strokeStyle='#aec3d2';c.lineWidth=1;
+        c.beginPath();for(let i=0;i<7;i++){const a=i*Math.PI*2/7,px=x+Math.cos(a)*(r+(i%2?1:-2)),py=y+Math.sin(a)*(r+(i%3?1:-2));if(!i)c.moveTo(px,py);else c.lineTo(px,py);}c.closePath();c.fill();c.stroke();break;
+      case 'shelter':
+        c.beginPath();c.arc(x,y,r+3,0,Math.PI*2);c.fillStyle='rgba(96,179,238,.13)';c.fill();
+        c.strokeStyle='#86bfe7';c.lineWidth=2;c.beginPath();c.moveTo(x-r,y+r*.55);c.lineTo(x,y-r*.7);c.lineTo(x+r,y+r*.55);c.stroke();break;
+      case 'hazard':
+        c.beginPath();c.arc(x,y,r+3,0,Math.PI*2);c.fillStyle='rgba(231,106,132,.14)';c.fill();
+        c.beginPath();c.arc(x,y,r*.55,0,Math.PI*2);c.fillStyle='#eb8297';c.fill();break;
+      default:
+        c.beginPath();c.arc(x,y,r*.6,0,Math.PI*2);c.fillStyle='#64d7a4';c.fill();break;
+    }
+    c.restore();
   }
   if(Math.hypot(world.x-lastWorld.x,world.y-lastWorld.y)>.003){trail.push({x:world.x,y:world.y});if(trail.length>130)trail.shift();lastWorld={x:world.x,y:world.y};}
   c.beginPath();trail.forEach((p,i)=>{const [x,y]=point(p.x,p.y);if(i===0)c.moveTo(x,y);else c.lineTo(x,y)});c.strokeStyle='rgba(95,178,219,.46)';c.lineWidth=1.4;c.stroke();
-  const [x,y]=point(world.x,world.y),angle=world.heading;
-  c.save();c.translate(x,y);c.rotate(angle);c.fillStyle='rgba(106,196,252,.15)';c.beginPath();c.arc(0,0,19,0,Math.PI*2);c.fill();
+  c.save();c.translate(agentX,agentY);c.rotate(world.heading);c.fillStyle='rgba(106,196,252,.15)';c.beginPath();c.arc(0,0,16,0,Math.PI*2);c.fill();
   c.beginPath();c.moveTo(14,0);c.lineTo(-10,-8);c.lineTo(-6,0);c.lineTo(-10,8);c.closePath();c.fillStyle='#8bd7ff';c.fill();c.restore();
-  c.fillStyle='#8ca4b8';c.font='11px system-ui';c.fillText('Питание • зелёное     Опасность • красное',14,19);
+  c.fillStyle='#8ca4b8';c.font='11px system-ui';c.fillText('Пища · опасность · камни · укрытия  |  тусклые объекты не видны агенту',14,19);
 }
 function drawChart(){
   const {w,h}=resizeCanvas(chartCanvas,chartCtx),c=chartCtx;c.clearRect(0,0,w,h);const left=40,top=10,right=w-12,bottom=h-24;
@@ -113,6 +131,11 @@ async function poll(){
     $('m-structures').textContent=String(n.metrics.structures);
     $('m-structure-births').textContent=`+${n.metrics.structureBirths} новых`;
     $('energy').textContent=`${Math.round(world.energy*100)}%`;$('energy-bar').style.width=`${world.energy*100}%`;$('food-collected').textContent=world.foodCollected;
+    $('world-light').textContent=`${Math.round(world.daylight*100)}%`;
+    $('world-temp').textContent=world.ambientTemperature.toFixed(2);
+    $('world-visible').textContent=String(world.visibleObjects);
+    $('world-collisions').textContent=String(world.collisions);
+    updateWorldSensors(world.sensors||[]);
     if(!paused&&(!history.length||n.metrics.steps!==history[history.length-1].steps)){
       history.push({activity:n.metrics.meanActivity,stress:n.metrics.meanStress,memory:n.metrics.meanConsolidation||0,steps:n.metrics.steps});if(history.length>220)history.shift();
     }
@@ -176,7 +199,7 @@ worldCanvas.addEventListener('click',async e=>{
   const r=worldCanvas.getBoundingClientRect(),square=Math.min(r.width-30,r.height-24),scale=square/2;
   const x=(e.clientX-r.left-r.width/2)/scale,y=(e.clientY-r.top-r.height/2)/scale;
   if(Math.abs(x)>1||Math.abs(y)>1)return;
-  await post('/api/world/spawn',{x,y,hazard:$('spawnMode').value==='hazard'});
+  await post('/api/world/spawn',{x,y,kind:$('spawnMode').value});
 });
 
 
@@ -226,4 +249,37 @@ $('run-memory-experiment').addEventListener('click', async()=>{
     $('memory-experiment-summary').textContent=`Закреплённые связи: ${end.repeatedStable} (повторение) / ${end.shuffledStable} (перемешивание). Отклик на знакомую пару: ${memoryStudy.repeatedProbeResponse.toFixed(4)} / ${memoryStudy.shuffledProbeResponse.toFixed(4)}.`;
   }catch(error){$('memory-experiment-status').textContent=`Ошибка исследования: ${error.message}`;}
   finally{button.disabled=false;}
+});
+
+
+const sensorLabels=['Пища слева','Пища спереди','Пища справа','Опасн. слева','Опасн. спереди','Опасн. справа','Укрытие слева','Укрытие спереди','Укрытие справа','Камень спереди','Нехватка энергии','Холод / жара'];
+const sensorMeters=sensorLabels.map(label=>{
+  const element=document.createElement('div');element.className='sensor-sample';
+  const name=document.createElement('span');name.textContent=label;
+  const bar=document.createElement('div');bar.className='sensor-meter';
+  const fill=document.createElement('i');bar.append(fill);element.append(name,bar);
+  $('world-sensors').append(element);return fill;
+});
+function updateWorldSensors(values){values.forEach((v,i)=>{if(sensorMeters[i])sensorMeters[i].style.width=`${Math.min(100,Math.max(0,v/3*100))}%`;});}
+for(const [id,key,format] of [['vision-angle','fieldOfViewDegrees',v=>`${v}°`],['vision-range','visionRange',v=>Number(v).toFixed(2)]]){
+  const slider=$(id),out=$(id+'-v');
+  slider.addEventListener('input',()=>out.value=format(slider.value));
+  slider.addEventListener('change',()=>post('/api/control',{[key]:Number(slider.value)}));
+}
+$('run-retention-experiment').addEventListener('click',async()=>{
+  const button=$('run-retention-experiment'),status=$('retention-status'),target=$('retention-results');
+  button.disabled=true;status.textContent='Выполняется независимый опыт. Текущий мир и сеть не затрагиваются…';
+  try{
+    const response=await fetch('/api/memory/retention',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({seed:1337,episodes:Number($('retention-episodes').value),delaySteps:Number($('retention-delay').value)})});
+    if(!response.ok)throw new Error(`HTTP ${response.status}`);
+    const data=await response.json();
+    status.textContent=`Seed ${data.seed}, ${data.episodes} эпизодов, ${data.delaySteps} тиков отсрочки.`;
+    const table=document.createElement('table');
+    const row=document.createElement('tr');
+    for(const label of ['Состояние','Знакомый отклик','Новый отклик','Различимость','Сдвиг от базовой реакции','Стабильные связи']){const th=document.createElement('th');th.textContent=label;row.append(th);}
+    const head=document.createElement('thead');head.append(row);table.append(head);
+    const body=document.createElement('tbody');
+    for(const p of data.results){const tr=document.createElement('tr');for(const value of [p.phase,p.familiarResponse.toFixed(4),p.novelResponse.toFixed(4),p.patternSeparation.toFixed(4),p.familiarDriftFromBaseline.toFixed(4),String(p.stableConnections)]){const td=document.createElement('td');td.textContent=value;tr.append(td);}body.append(tr);}
+    table.append(body);target.replaceChildren(table);
+  }catch(error){status.textContent=`Ошибка опыта: ${error.message}`;}finally{button.disabled=false;}
 });
