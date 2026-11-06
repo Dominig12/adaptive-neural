@@ -204,7 +204,7 @@ public sealed partial class AdaptiveNetwork
         for (int i = _inputs.Count - 1; i >= SensorCount; i--)
         {
             AdaptivePort port = _inputs[i];
-            if (Steps - port.CreatedAt < 900 || port.Usage > 0.04f) continue;
+            if (Steps - port.CreatedAt < 1800 || port.Usage > 0.02f) continue;
             _inputs.RemoveAt(i);
             Neuron n = _neurons[port.NeuronId];
             n.Role = NeuronRole.Internal;
@@ -215,7 +215,7 @@ public sealed partial class AdaptiveNetwork
         for (int i = _outputs.Count - 1; i >= MotorCount; i--)
         {
             AdaptivePort port = _outputs[i];
-            if (Steps - port.CreatedAt < 900 || port.Usage > 0.04f) continue;
+            if (Steps - port.CreatedAt < 1800 || port.Usage > 0.02f) continue;
             _outputs.RemoveAt(i);
             Neuron n = _neurons[port.NeuronId];
             n.Role = NeuronRole.Internal;
