@@ -215,3 +215,55 @@ Check(engine.Snapshot(-1).Network.Metrics.Steps == 0, "reset deterministic exper
 Check(engine.Snapshot(-1).World.FieldOfViewDegrees == 90f, "world settings persist after reset");
 
 Console.WriteLine($"\nAll checks passed. After 1200 ticks: {snapshot.Metrics.Neurons} neurons, {snapshot.Metrics.Connections} synapses, {snapshot.Metrics.Births} births, {snapshot.Metrics.PrunedConnections} pruned.");
+
+// Spatial course: same physics, route opening moves, network remains independent.
+var upperCourse = new ForagerWorld(100, populate: false);
+upperCourse.ConfigureCourse(SpatialCourse.Upper);
+var initialUpper = upperCourse.Snapshot();
+Check(initialUpper.Course == "upper" && initialUpper.FoodCollected == 0 &&
+      initialUpper.Objects.Count(o => o.Kind == "food") == 1,
+    "upper navigation course has one fixed goal");
+Check(initialUpper.Objects.Any(o => o.Kind == "shelter" && o.Y < 0f),
+    "upper course landmark is above centre");
+var lowerCourse = new ForagerWorld(100, populate: false);
+lowerCourse.ConfigureCourse(SpatialCourse.Lower);
+Check(lowerCourse.Snapshot().Objects.Any(o => o.Kind == "shelter" && o.Y > 0f),
+    "lower course relocates the passage cue");
+Check(initialUpper.Objects.Count(o => o.Kind == "rock") == lowerCourse.Snapshot().Objects.Count(o => o.Kind == "rock"),
+    "both layouts have matching obstacle budgets");
+for (int i = 0; i < 160; i++) upperCourse.Step([0f, 0f, 1f]);
+Check(upperCourse.DistanceTravelled > 0f &&
+      upperCourse.BestGoalDistance <= initialUpper.BestGoalDistance &&
+      float.IsFinite(upperCourse.GoalDistance),
+    "navigation metrics track cumulative progress and distance");
+upperCourse.ConfigureCourse(SpatialCourse.Lower);
+Check(upperCourse.Collisions == 0 && upperCourse.DistanceTravelled == 0f &&
+      upperCourse.Snapshot().Course == "lower", "reconfiguring route resets agent but not network");
+
+var spatial1 = SpatialExperiment.Run(new SpatialExperimentRequest(Seed: 246, Episodes: 2,
+    EpisodeSteps: 120, EvaluationSteps: 160));
+var spatial2 = SpatialExperiment.Run(new SpatialExperimentRequest(Seed: 246, Episodes: 2,
+    EpisodeSteps: 120, EvaluationSteps: 160));
+Check(spatial1.Trials.Length == 5 && spatial1.TrainingHistory.Length == 2,
+    "route-transfer probe contains naive, adapted and frozen-control conditions");
+Check(spatial1.Trials[0].Course == "upper" && spatial1.Trials[3].Course == "lower" &&
+      spatial1.Trials.All(x => x.Trajectory.Length > 1 && x.Objects.Length > 0),
+    "route transfer produces spatial trajectories for both layouts");
+Check(spatial1.Trials.All(x => float.IsFinite(x.ClosestGoalDistance) && x.Collisions >= 0 &&
+      x.DistanceTravelled >= 0 && x.Energy is >= 0f and <= 1f),
+    "spatial readout remains finite and bounded");
+Check(spatial1.Trials.Select(t => (t.Collisions, t.ClosestGoalDistance, t.DistanceTravelled))
+      .SequenceEqual(spatial2.Trials.Select(t => (t.Collisions, t.ClosestGoalDistance, t.DistanceTravelled))) &&
+      spatial1.Trials[3].Trajectory.SequenceEqual(spatial2.Trials[3].Trajectory),
+    "closed-loop route experiment is reproducible with a fixed seed");
+engine.Apply(new ControlRequest(Course: "upper"));
+Check(engine.Snapshot(-1).World.Course == "upper", "live course selection is available via API");
+long currentSteps = engine.Snapshot(-1).Network.Metrics.Steps;
+engine.Apply(new ControlRequest(Course: "lower"));
+Check(engine.Snapshot(-1).World.Course == "lower" &&
+      engine.Snapshot(-1).Network.Metrics.Steps == currentSteps,
+    "changing live route preserves neural experience");
+engine.Apply(new ControlRequest(Action: "reset"));
+Check(engine.Snapshot(-1).World.Course == "lower" &&
+      engine.Snapshot(-1).Network.Metrics.Steps == 0,
+    "full reset preserves route selection and resets network");

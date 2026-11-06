@@ -9,7 +9,7 @@ public sealed record ControlRequest(string? Action = null, int? Speed = null, in
     int? MaximumStructures = null, float? InterfaceGrowthThreshold = null,
     float? StructureGrowthThreshold = null, bool? MemoryConsolidation = null,
     float? MemoryActivationThreshold = null, float? ConsolidationRate = null,
-    float? VisionRange = null, float? FieldOfViewDegrees = null);
+    float? VisionRange = null, float? FieldOfViewDegrees = null, string? Course = null);
 public sealed record StimulusRequest(float X, float Y, float Strength = 2.4f);
 public sealed record SpawnRequest(float X, float Y, bool Hazard = false, string? Kind = null);
 
@@ -21,6 +21,7 @@ public sealed class SimulationEngine
     private ForagerWorld _world;
     private bool _paused;
     private int _speed = 1;
+    private string _course = "sandbox";
 
     public SimulationEngine()
     {
@@ -48,6 +49,18 @@ public sealed class SimulationEngine
         lock (_gate)
         {
             _world.ConfigureVision(request.VisionRange, request.FieldOfViewDegrees);
+            if (request.Course is "upper" or "lower" or "sandbox")
+            {
+                _course = request.Course;
+                if (_course == "sandbox")
+                {
+                    float range = _world.VisionRange, angle = _world.FieldOfViewDegrees;
+                    _world = new ForagerWorld(_config.Seed);
+                    _world.ConfigureVision(range, angle);
+                }
+                else _world.ConfigureCourse(_course == "upper" ? SpatialCourse.Upper : SpatialCourse.Lower);
+                _paused = true;
+            }
             if (request.Speed.HasValue) _speed = Math.Clamp(request.Speed.Value, 1, 8);
             if (request.TargetActivity.HasValue && float.IsFinite(request.TargetActivity.Value))
                 _config.TargetActivity = _network.Config.TargetActivity = Math.Clamp(request.TargetActivity.Value, 0.03f, 0.65f);
@@ -94,6 +107,8 @@ public sealed class SimulationEngine
                     _network = new AdaptiveNetwork(_config);
                     _world = new ForagerWorld(_config.Seed);
                     _world.ConfigureVision(range, angle);
+                    if (_course != "sandbox")
+                        _world.ConfigureCourse(_course == "upper" ? SpatialCourse.Upper : SpatialCourse.Lower);
                     _paused = true;
                     break;
             }

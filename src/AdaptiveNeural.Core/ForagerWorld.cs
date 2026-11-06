@@ -4,7 +4,10 @@ public sealed record WorldObjectView(float X, float Y, bool Hazard, string Kind,
 public sealed record WorldView(float X, float Y, float Heading, float Energy, int FoodCollected,
     float[] Sensors, float[] Motors, WorldObjectView[] Objects,
     float VisionRange, float EffectiveVisionRange, float FieldOfViewDegrees,
-    float Daylight, float AmbientTemperature, float Exposure, int VisibleObjects, int Collisions);
+    float Daylight, float AmbientTemperature, float Exposure, int VisibleObjects, int Collisions,
+    string Course, float GoalDistance, float BestGoalDistance, float DistanceTravelled);
+
+public enum SpatialCourse { Upper, Lower }
 
 /// <summary>
 /// Deterministic continuous 2D environment. Only objects within a vision cone and
@@ -34,6 +37,15 @@ public sealed class ForagerWorld
     private long _steps;
     private int _collisions;
     private int _visibleObjects;
+    private bool _fixedCourse;
+    private string _course = "sandbox";
+    private float _bestGoalDistance;
+    private float _distanceTravelled;
+    private const float GoalX = 0.76f, GoalY = 0f;
+    public string Course => _course;
+    public float GoalDistance => _fixedCourse ? MathF.Sqrt((GoalX - X) * (GoalX - X) + (GoalY - Y) * (GoalY - Y)) : 0f;
+    public float BestGoalDistance => _bestGoalDistance;
+    public float DistanceTravelled => _distanceTravelled;
 
     public float X { get; private set; }
     public float Y { get; private set; }
@@ -59,6 +71,36 @@ public sealed class ForagerWorld
             for (int i = 0; i < 6; i++) SpawnRandom("rock");
             for (int i = 0; i < 3; i++) SpawnRandom("shelter");
         }
+        UpdateClimate();
+        SampleSensors();
+    }
+
+    /// <summary>
+    /// Repeatable navigation course: a barrier has a traversable opening above or below
+    /// the centre. Maps are otherwise identical. Reconfiguring a course resets the
+    /// physical agent but does not touch any neural network attached to the world.
+    /// </summary>
+    public void ConfigureCourse(SpatialCourse layout)
+    {
+        _objects.Clear();
+        _fixedCourse = true;
+        _course = layout == SpatialCourse.Upper ? "upper" : "lower";
+        X = -0.77f; Y = 0f; Heading = 0f;
+        Energy = 0.85f; FoodCollected = 0;
+        _steps = 0; _collisions = 0; _distanceTravelled = 0f;
+        _bestGoalDistance = GoalDistance;
+        Array.Clear(_motors);
+        float opening = layout == SpatialCourse.Upper ? -0.39f : 0.39f;
+        for (int i = -6; i <= 6; i++)
+        {
+            float y = i * 0.13f;
+            if (MathF.Abs(y - opening) <= 0.20f) continue;
+            _objects.Add(new WorldObject { X = -0.04f, Y = y, Kind = "rock", Radius = RadiusFor("rock") });
+        }
+        // A landmark near the opening is visible to the agent. It gives the
+        // environment a reusable cue without supplying the correct action.
+        _objects.Add(new WorldObject { X = -0.31f, Y = opening, Kind = "shelter", Radius = RadiusFor("shelter") });
+        _objects.Add(new WorldObject { X = GoalX, Y = GoalY, Kind = "food", Radius = RadiusFor("food") });
         UpdateClimate();
         SampleSensors();
     }
@@ -226,8 +268,11 @@ public sealed class ForagerWorld
             nx = item.X + dx / distance * limit;
             ny = item.Y + dy / distance * limit;
         }
+        float oldX = X, oldY = Y;
         X = Math.Clamp(nx, -0.95f, 0.95f);
         Y = Math.Clamp(ny, -0.95f, 0.95f);
+        _distanceTravelled += MathF.Sqrt((X - oldX) * (X - oldX) + (Y - oldY) * (Y - oldY));
+        if (_fixedCourse) _bestGoalDistance = MathF.Min(_bestGoalDistance, GoalDistance);
         if (blocked) { _collisions++; Heading += 0.19f; }
         UpdateClimate();
         Energy = Math.Clamp(Energy - dt * (0.004f + speed * 0.012f + Exposure * 0.010f), 0f, 1f);
@@ -242,7 +287,7 @@ public sealed class ForagerWorld
                 Energy = Math.Clamp(Energy + 0.19f, 0f, 1f);
                 FoodCollected++;
                 _objects.RemoveAt(i);
-                SpawnRandom("food");
+                if (!_fixedCourse) SpawnRandom("food");
             }
             if (item.Kind == "shelter") Energy = Math.Clamp(Energy + dt * 0.012f, 0f, 1f);
         }
@@ -253,5 +298,5 @@ public sealed class ForagerWorld
         (float[])_sensors.Clone(), (float[])_motors.Clone(),
         _objects.Select(o => new WorldObjectView(o.X, o.Y, o.Kind == "hazard", o.Kind, o.Radius, InSight(o))).ToArray(),
         VisionRange, EffectiveVisionRange, FieldOfViewDegrees, Daylight, AmbientTemperature,
-        Exposure, _visibleObjects, _collisions);
+        Exposure, _visibleObjects, _collisions, _course, GoalDistance, _bestGoalDistance, _distanceTravelled);
 }

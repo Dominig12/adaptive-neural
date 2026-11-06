@@ -46,3 +46,13 @@
 .retention-results th:first-child,.retention-results td:first-child{text-align:left}
 .retention-results th{font-size:11px;color:#a1bbd5;font-weight:550}
 @media(max-width:600px){.world-vision{grid-template-columns:1fr}.world-sensor-list{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Spatial-transfer experiment: responsive trajectories with no external charts. */
+.spatial-panel{margin-top:15px;padding-bottom:8px}
+.spatial-results{display:grid;grid-template-columns:repeat(auto-fit,minmax(205px,1fr));gap:12px;padding:4px 19px 12px}
+.spatial-card{min-width:0;padding:10px;border:1px solid #2a3e50;border-radius:10px;background:#0b1725}
+.spatial-card h3{font-size:12px;min-height:34px;margin:0 0 7px;color:#d4e3f4;font-weight:600}
+.spatial-map{display:block;width:100%;height:192px;border-radius:7px;background:#081321}
+.spatial-numbers{font-size:11px;line-height:1.55;color:#9db2c8;padding-top:8px}
+#spatial-history{margin:3px 19px 10px}
+.world-control{flex-wrap:wrap}

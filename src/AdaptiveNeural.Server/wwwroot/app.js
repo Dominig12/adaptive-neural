@@ -135,6 +135,8 @@ async function poll(){
     $('world-temp').textContent=world.ambientTemperature.toFixed(2);
     $('world-visible').textContent=String(world.visibleObjects);
     $('world-collisions').textContent=String(world.collisions);
+    $('world-goal').textContent=world.course==='sandbox'?'—':world.goalDistance.toFixed(2);
+    $('world-best').textContent=world.course==='sandbox'?'—':world.bestGoalDistance.toFixed(2);
     updateWorldSensors(world.sensors||[]);
     if(!paused&&(!history.length||n.metrics.steps!==history[history.length-1].steps)){
       history.push({activity:n.metrics.meanActivity,stress:n.metrics.meanStress,memory:n.metrics.meanConsolidation||0,steps:n.metrics.steps});if(history.length>220)history.shift();
@@ -148,6 +150,10 @@ $('play').addEventListener('click',async()=>{await post('/api/control',{action:p
 $('step').addEventListener('click',async()=>{await post('/api/control',{action:'step'});poll();});
 $('reset').addEventListener('click',async()=>{await post('/api/control',{action:'reset'});graph.version=-1;history=[];trail=[];poll();});
 $('speed').addEventListener('change',e=>post('/api/control',{speed:Number(e.target.value)}));
+$('courseMode').addEventListener('change',async e=>{
+  await post('/api/control',{course:e.target.value});
+  trail=[];lastWorld={x:0,y:0};poll();
+});
 function setting(id,key,digits){
   const el=$(id),out=$(id+'-v');el.addEventListener('input',()=>{out.value=Number(el.value).toFixed(digits)});
   el.addEventListener('change',()=>post('/api/control',{[key]:Number(el.value)}));
@@ -282,4 +288,67 @@ $('run-retention-experiment').addEventListener('click',async()=>{
     for(const p of data.results){const tr=document.createElement('tr');for(const value of [p.phase,p.familiarResponse.toFixed(4),p.novelResponse.toFixed(4),p.patternSeparation.toFixed(4),p.familiarDriftFromBaseline.toFixed(4),String(p.stableConnections)]){const td=document.createElement('td');td.textContent=value;tr.append(td);}body.append(tr);}
     table.append(body);target.replaceChildren(table);
   }catch(error){status.textContent=`Ошибка опыта: ${error.message}`;}finally{button.disabled=false;}
+});
+
+
+// Spatial readout uses independent network instances; maps and traces are drawn
+// from returned data rather than inferred from training success.
+function drawSpatialTrial(canvas, trial) {
+  const context=canvas.getContext('2d'), {w,h}=resizeCanvas(canvas,context);
+  context.clearRect(0,0,w,h);
+  drawGrid(context,w,h,28);
+  const size=Math.min(w-16,h-18)/2, cx=w/2,cy=h/2;
+  const pos=(x,y)=>[cx+x*size,cy+y*size];
+  context.strokeStyle='#55708a';context.strokeRect(cx-size,cy-size,size*2,size*2);
+  for(const object of trial.objects){
+    const [x,y]=pos(object.x,object.y),r=Math.max(2,object.radius*size);
+    context.beginPath();context.arc(x,y,r,0,2*Math.PI);
+    context.fillStyle=object.kind==='rock'?'#768a9b':object.kind==='food'?'#63d8a9':'#6e9acc';context.fill();
+  }
+  context.beginPath();
+  trial.trajectory.forEach((point,i)=>{
+    const [x,y]=pos(point.x,point.y);
+    if(i===0)context.moveTo(x,y);else context.lineTo(x,y);
+  });
+  context.strokeStyle='#f4b26c';context.lineWidth=2.4;context.stroke();
+  if(trial.trajectory.length){
+    const start=trial.trajectory[0],end=trial.trajectory.at(-1);
+    for(const [point,color] of [[start,'#70d5e0'],[end,'#f4b26c']]){
+      const [x,y]=pos(point.x,point.y);
+      context.beginPath();context.arc(x,y,4,0,2*Math.PI);context.fillStyle=color;context.fill();
+    }
+  }
+  context.font='10px system-ui';context.fillStyle='#9cb0c6';
+  context.fillText(trial.course==='upper'?'Проход сверху':'Проход снизу',9,15);
+}
+$('run-spatial-experiment').addEventListener('click', async()=>{
+  const button=$('run-spatial-experiment');button.disabled=true;
+  $('spatial-status').textContent='Изолированный эксперимент выполняется. Живая симуляция продолжает работать…';
+  try {
+    const response=await fetch('/api/spatial/experiment',{
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        seed:1337,
+        episodes:Number($('spatial-episodes').value),
+        episodeSteps:Number($('spatial-steps').value),
+        evaluationSteps:Number($('spatial-evaluation').value)
+      })
+    });
+    if(!response.ok)throw new Error(`HTTP ${response.status}`);
+    const result=await response.json();
+    const cards=[];
+    for(const trial of result.trials){
+      const card=document.createElement('article');card.className='spatial-card';
+      const title=document.createElement('h3');title.textContent=trial.phase;
+      const canvas=document.createElement('canvas');canvas.className='spatial-map';
+      const info=document.createElement('div');info.className='spatial-numbers';
+      info.textContent=`Пища: ${trial.foodCollected} · ближайшее расстояние: ${trial.closestGoalDistance.toFixed(2)} · столкновения: ${trial.collisions} · путь: ${trial.distanceTravelled.toFixed(2)} · энергия: ${(trial.energy*100).toFixed(0)}%`;
+      card.append(title,canvas,info);cards.push(card);
+    }
+    $('spatial-results').replaceChildren(...cards);
+    result.trials.forEach((trial,i)=>drawSpatialTrial(cards[i].querySelector('canvas'),trial));
+    const best=result.trainingHistory.map(x=>x.closestGoalDistance.toFixed(2)).join(' / ');
+    $('spatial-history').textContent=`Минимальное расстояние до цели по ${result.episodes} обучающим попыткам: ${best}. Меньшее значение — ближе к цели.`;
+    $('spatial-status').textContent=`Seed ${result.seed} · ${result.episodes} обучающих попыток × ${result.episodeSteps} шагов · ${result.evaluationSteps} шагов проверки`;
+  } catch(error){$('spatial-status').textContent=`Ошибка: ${error.message}`;}
+  finally {button.disabled=false;}
 });
