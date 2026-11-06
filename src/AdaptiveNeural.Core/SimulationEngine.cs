@@ -7,7 +7,8 @@ public sealed record ControlRequest(string? Action = null, int? Speed = null, in
     bool? AdaptiveInterfaces = null, bool? AdaptiveStructures = null,
     int? MaximumInputPorts = null, int? MaximumOutputPorts = null,
     int? MaximumStructures = null, float? InterfaceGrowthThreshold = null,
-    float? StructureGrowthThreshold = null);
+    float? StructureGrowthThreshold = null, bool? MemoryConsolidation = null,
+    float? MemoryActivationThreshold = null, float? ConsolidationRate = null);
 public sealed record StimulusRequest(float X, float Y, float Strength = 2.4f);
 public sealed record SpawnRequest(float X, float Y, bool Hazard = false);
 
@@ -68,6 +69,14 @@ public sealed class SimulationEngine
                 _config.InterfaceGrowthThreshold = _network.Config.InterfaceGrowthThreshold = Math.Clamp(request.InterfaceGrowthThreshold.Value, 0.005f, 0.3f);
             if (request.StructureGrowthThreshold.HasValue && float.IsFinite(request.StructureGrowthThreshold.Value))
                 _config.StructureGrowthThreshold = _network.Config.StructureGrowthThreshold = Math.Clamp(request.StructureGrowthThreshold.Value, 0.005f, 0.3f);
+            if (request.MemoryConsolidation.HasValue)
+                _config.MemoryConsolidation = _network.Config.MemoryConsolidation = request.MemoryConsolidation.Value;
+            if (request.MemoryActivationThreshold.HasValue && float.IsFinite(request.MemoryActivationThreshold.Value))
+                _config.MemoryActivationThreshold = _network.Config.MemoryActivationThreshold =
+                    Math.Clamp(request.MemoryActivationThreshold.Value, 0.1f, 0.8f);
+            if (request.ConsolidationRate.HasValue && float.IsFinite(request.ConsolidationRate.Value))
+                _config.ConsolidationRate = _network.Config.ConsolidationRate =
+                    Math.Clamp(request.ConsolidationRate.Value, 0f, 1f);
             if (request.InitialNeurons.HasValue)
                 _config.InitialNeurons = Math.Clamp(request.InitialNeurons.Value, 20, 1500);
             if (request.MaximumNeurons.HasValue)

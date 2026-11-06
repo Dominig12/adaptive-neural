@@ -101,6 +101,46 @@ for (int i = 0; i < 900; i++) noPorts.Step(highStimulus);
 Check(noPorts.InputPortCount == 8 && noPorts.OutputPortCount == 3 && noPorts.StructureCount == 4,
     "independent evolution toggles prevent port and structure births");
 
+// Local memory rule: one continuous pulse counts as one episode; repeated separated
+// coactivation stabilizes a synapse. Unrelated and isolated activity does not.
+var trace = new SynapticMemory();
+long tick = 0;
+for (int episode = 0; episode < 6; episode++)
+{
+    for (int i = 0; i < 10; i++) trace.Observe(0.85f, 0.8f, 0.7f, ++tick, 0.26f, 0.30f, 0.00002f);
+    for (int i = 0; i < 20; i++) trace.Observe(0.01f, 0.01f, 0.7f, ++tick, 0.26f, 0.30f, 0.00002f);
+}
+Check(trace.Episodes == 6 && trace.IsStable, "repeated separated activity consolidates a synapse");
+float stableStrength = trace.Stability;
+for (int i = 0; i < 30; i++) trace.Observe(0.8f, 0.03f, 0.7f, ++tick, 0.26f, 0.30f, 0.00002f);
+Check(trace.Episodes == 6 && trace.Stability < stableStrength, "unpaired events do not consolidate, trace fades");
+for (int i = 0; i < 260; i++) trace.Observe(0.03f, 0.03f, 0.7f, ++tick, 0.26f, 0.30f, 0.003f);
+Check(!trace.IsStable && trace.Stability >= 0f, "unused stability eventually decays");
+
+var noMemory = new AdaptiveNetwork(new NetworkConfig { MemoryConsolidation = false });
+for (int i = 0; i < 400; i++) noMemory.Step(highStimulus);
+Check(noMemory.Snapshot(-1).Metrics.StableConnections == 0,
+    "memory switch disables consolidation of new synapses");
+
+var memoryView = evolving.Snapshot(-1);
+Check(memoryView.MemoryGroups.Length == evolving.StructureCount &&
+      memoryView.MemoryGroups.All(g => float.IsFinite(g.MeanStability) &&
+          g.MeanStability is >= 0f and <= 1f && g.StableConnections <= g.Connections),
+      "per-ensemble memory statistics are finite and bounded");
+
+var studyA = MemoryExperiment.Run(new MemoryExperimentRequest(Seed: 9876, Episodes: 12));
+var studyB = MemoryExperiment.Run(new MemoryExperimentRequest(Seed: 9876, Episodes: 12));
+Check(studyA.Series.Length == 12 && !ReferenceEquals(studyA.Series, studyB.Series),
+    "memory trial produces independent history arrays");
+Check(studyA.Series.SequenceEqual(studyB.Series) &&
+      studyA.RepeatedProbeResponse == studyB.RepeatedProbeResponse &&
+      studyA.ShuffledProbeResponse == studyB.ShuffledProbeResponse,
+      "paired experience experiment is deterministic with same seed");
+Check(studyA.Series.All(p => p.RepeatedStable >= 0 && p.ShuffledStable >= 0 &&
+    p.RepeatedMean is >= 0f and <= 1f && p.ShuffledMean is >= 0f and <= 1f) &&
+    float.IsFinite(studyA.RepeatedProbeResponse) && float.IsFinite(studyA.ShuffledProbeResponse),
+    "memory experiment returns bounded, finite observations");
+
 var disabled = new AdaptiveNetwork(new NetworkConfig { StructuralPlasticity = false });
 int count = disabled.ConnectionCount;
 for (int i = 0; i < 500; i++) disabled.Step(new float[8]);

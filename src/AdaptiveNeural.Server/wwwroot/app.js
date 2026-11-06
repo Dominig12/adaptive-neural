@@ -1,6 +1,8 @@
 const $ = id => document.getElementById(id);
 const netCanvas = $('neural'), worldCanvas = $('world'), chartCanvas = $('chart');
 const ctx = netCanvas.getContext('2d'), worldCtx = worldCanvas.getContext('2d'), chartCtx = chartCanvas.getContext('2d');
+const memoryChartCanvas = $('memory-chart'), memoryChartCtx = memoryChartCanvas.getContext('2d');
+let memoryStudy = null;
 let graph = {nodes:[], edges:[], activities:[], inputs:[], outputs:[], structures:[], version:-1}, world = null, paused = false, speed = 1;
 let history = [], inflight = false, lastFrame = 0;
 let view = {scale:1, x:0, y:0}, drag = null;
@@ -79,13 +81,13 @@ function drawChart(){
   c.font='10px system-ui';c.strokeStyle='#2d4255';c.fillStyle='#7890a6';c.lineWidth=.7;
   for(let i=0;i<=4;i++){const y=top+(bottom-top)*i/4;c.beginPath();c.moveTo(left,y);c.lineTo(right,y);c.stroke();c.fillText((1-i/4).toFixed(2),5,y+3);}
   if(history.length<2)return;
-  for(const [key,color] of [['activity','#65ddc2'],['stress','#f4b26c']]){
+  for(const [key,color] of [['activity','#65ddc2'],['stress','#f4b26c'],['memory','#bd96ed']]){
     c.beginPath();history.forEach((item,i)=>{const x=left+(right-left)*i/219,y=bottom-Math.min(1,item[key])*(bottom-top);if(!i)c.moveTo(x,y);else c.lineTo(x,y)});
     c.strokeStyle=color;c.lineWidth=2;c.stroke();
   }
   c.fillText('Последние ~22 с при 1×',left,bottom+17);
 }
-function draw(ts){requestAnimationFrame(draw);if(ts-lastFrame<33)return;lastFrame=ts;drawNetwork();drawWorld();drawChart();}
+function draw(ts){requestAnimationFrame(draw);if(ts-lastFrame<33)return;lastFrame=ts;drawNetwork();drawWorld();drawChart();drawMemoryStudy();}
 requestAnimationFrame(draw);
 
 async function post(url,data){
@@ -105,11 +107,14 @@ async function poll(){
     $('m-activity').textContent=n.metrics.meanActivity.toFixed(3);$('m-stress').textContent=n.metrics.meanStress.toFixed(3);$('m-steps').textContent=n.metrics.steps.toLocaleString('ru-RU');
     $('m-ports').textContent=`${n.metrics.inputPorts} / ${n.metrics.outputPorts}`;
     $('m-port-births').textContent=`+${n.metrics.inputBirths} / +${n.metrics.outputBirths} · ${n.metrics.retiredPorts} отозвано`;
+    $('m-memory').textContent=n.metrics.stableConnections.toLocaleString('ru-RU');
+    $('m-memory-strength').textContent=`${(n.metrics.meanConsolidation||0).toFixed(3)} средняя · ${n.metrics.memoryReactivations||0} эпизодов`;
+    updateMemoryGroups(n.memoryGroups||[]);
     $('m-structures').textContent=String(n.metrics.structures);
     $('m-structure-births').textContent=`+${n.metrics.structureBirths} новых`;
     $('energy').textContent=`${Math.round(world.energy*100)}%`;$('energy-bar').style.width=`${world.energy*100}%`;$('food-collected').textContent=world.foodCollected;
     if(!paused&&(!history.length||n.metrics.steps!==history[history.length-1].steps)){
-      history.push({activity:n.metrics.meanActivity,stress:n.metrics.meanStress,steps:n.metrics.steps});if(history.length>220)history.shift();
+      history.push({activity:n.metrics.meanActivity,stress:n.metrics.meanStress,memory:n.metrics.meanConsolidation||0,steps:n.metrics.steps});if(history.length>220)history.shift();
     }
     $('connection').className='connection connected';$('connection').innerHTML='<span class="dot"></span>Локальный сервер';
   }catch(error){$('connection').className='connection error';$('connection').innerHTML='<span class="dot"></span>Нет соединения';console.warn(error);}
@@ -126,9 +131,11 @@ function setting(id,key,digits){
 }
 setting('target','targetActivity',3);setting('learning','learningRate',4);setting('growth','growthThreshold',3);
 setting('interface-growth','interfaceGrowthThreshold',3);setting('structure-growth','structureGrowthThreshold',3);
+setting('memory-threshold','memoryActivationThreshold',3);
 $('structural').addEventListener('change',e=>post('/api/control',{structuralPlasticity:e.target.checked}));
 $('adaptive-interfaces').addEventListener('change',e=>post('/api/control',{adaptiveInterfaces:e.target.checked}));
 $('adaptive-structures').addEventListener('change',e=>post('/api/control',{adaptiveStructures:e.target.checked}));
+$('memory-consolidation').addEventListener('change',e=>post('/api/control',{memoryConsolidation:e.target.checked}));
 
 function updateEvolutionInspector(){
   $('input-ports-count').textContent=String(graph.inputs.length);
@@ -170,4 +177,53 @@ worldCanvas.addEventListener('click',async e=>{
   const x=(e.clientX-r.left-r.width/2)/scale,y=(e.clientY-r.top-r.height/2)/scale;
   if(Math.abs(x)>1||Math.abs(y)>1)return;
   await post('/api/world/spawn',{x,y,hazard:$('spawnMode').value==='hazard'});
+});
+
+
+function updateMemoryGroups(groups){
+  const entries=[];
+  for(const group of groups){
+    const row=document.createElement('div');row.className='memory-group';
+    const label=document.createElement('strong');label.textContent=`Ансамбль ${group.groupId}`;
+    const track=document.createElement('div');track.className='memory-progress';
+    const progress=document.createElement('div');progress.style.width=`${Math.min(100,Math.max(0,group.meanStability*100))}%`;
+    track.append(progress);
+    const note=document.createElement('small');note.textContent=`${group.stableConnections}/${group.connections}`;
+    row.title=`Корреляция: сенсор ${group.preferredSensor>=0?group.preferredSensor:'—'}, избирательность ${(group.selectivity*100).toFixed(0)}%`;
+    row.append(label,track,note);entries.push(row);
+  }
+  $('memory-groups').replaceChildren(...entries);
+}
+
+function drawMemoryStudy(){
+  const {w,h}=resizeCanvas(memoryChartCanvas,memoryChartCtx),c=memoryChartCtx;
+  c.clearRect(0,0,w,h);drawGrid(c,w,h,38);
+  if(!memoryStudy?.series?.length){c.fillStyle='#8197aa';c.font='12px system-ui';c.fillText('Результаты ещё не получены',18,26);return;}
+  const items=memoryStudy.series,plot={l:38,r:w-12,t:14,b:h-32};
+  const maximum=Math.max(1,...items.flatMap(x=>[x.repeatedStable,x.shuffledStable]));
+  c.font='10px system-ui';c.fillStyle='#8198b0';
+  for(let k=0;k<=4;k++){const y=plot.t+(plot.b-plot.t)*k/4;c.fillText(String(Math.round(maximum*(1-k/4))),5,y+3);}
+  for(const [key,color] of [['repeatedStable','#bd96ed'],['shuffledStable','#67baca']]){
+    c.beginPath();items.forEach((d,i)=>{
+      const x=plot.l+(plot.r-plot.l)*(items.length===1?0:i/(items.length-1));
+      const y=plot.b-(plot.b-plot.t)*d[key]/maximum;
+      if(i===0)c.moveTo(x,y);else c.lineTo(x,y);
+    });c.strokeStyle=color;c.lineWidth=2.1;c.stroke();
+  }
+  c.fillText('Повторяющаяся пара',plot.l, h-8);c.fillStyle='#bd96ed';c.fillRect(plot.l+112,h-15,13,3);
+  c.fillStyle='#8198b0';c.fillText('Перемешанные пары',plot.l+140,h-8);c.fillStyle='#67baca';c.fillRect(plot.l+263,h-15,13,3);
+}
+
+$('run-memory-experiment').addEventListener('click', async()=>{
+  const button=$('run-memory-experiment');button.disabled=true;
+  $('memory-experiment-status').textContent='Выполняется отдельный эксперимент; рабочая симуляция не затрагивается…';
+  try{
+    const response=await fetch('/api/memory/experiment',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({seed:1337,episodes:24})});
+    if(!response.ok)throw new Error(`HTTP ${response.status}`);
+    memoryStudy=await response.json();
+    const end=memoryStudy.series.at(-1);
+    $('memory-experiment-status').textContent=`${memoryStudy.episodes} эпизодов · одинаковый seed ${memoryStudy.seed} · независимые сети`;
+    $('memory-experiment-summary').textContent=`Закреплённые связи: ${end.repeatedStable} (повторение) / ${end.shuffledStable} (перемешивание). Отклик на знакомую пару: ${memoryStudy.repeatedProbeResponse.toFixed(4)} / ${memoryStudy.shuffledProbeResponse.toFixed(4)}.`;
+  }catch(error){$('memory-experiment-status').textContent=`Ошибка исследования: ${error.message}`;}
+  finally{button.disabled=false;}
 });

@@ -19,6 +19,10 @@ public sealed class NetworkConfig
     public int MaximumStructures { get; set; } = 12;
     public float InterfaceGrowthThreshold { get; set; } = 0.075f;
     public float StructureGrowthThreshold { get; set; } = 0.085f;
+    public bool MemoryConsolidation { get; set; } = true;
+    public float MemoryActivationThreshold { get; set; } = 0.26f;
+    public float ConsolidationRate { get; set; } = 0.30f;
+    public float MemoryDecayRate { get; set; } = 0.00002f;
 
     public NetworkConfig Clone() => (NetworkConfig)MemberwiseClone();
 }
@@ -30,10 +34,11 @@ public sealed record EdgeView(int From, int To, float Weight);
 public sealed record NetworkMetrics(int Neurons, int Connections, int Births, int NewConnections,
     int PrunedConnections, float MeanActivity, float MeanStress, long Steps,
     int InputPorts, int OutputPorts, int Structures, int InputBirths, int OutputBirths,
-    int StructureBirths, int RetiredPorts);
+    int StructureBirths, int RetiredPorts, int StableConnections, int MemoryReactivations,
+    float MeanConsolidation);
 public sealed record NetworkView(int TopologyVersion, float[] Activities, NeuronView[]? Nodes,
     EdgeView[]? Edges, NetworkMetrics Metrics, InterfaceView[]? Inputs,
-    InterfaceView[]? Outputs, StructureView[]? Structures);
+    InterfaceView[]? Outputs, StructureView[]? Structures, MemoryGroupView[] MemoryGroups);
 
 public sealed partial class AdaptiveNetwork
 {
@@ -63,6 +68,7 @@ public sealed partial class AdaptiveNetwork
         public float Weight;
         public float Utility = 0.025f;
         public long CreatedAt;
+        public SynapticMemory Memory;
     }
 
     private sealed class Pulse
@@ -84,6 +90,9 @@ public sealed partial class AdaptiveNetwork
     private int _topologyVersion = 1;
     private float _meanActivity;
     private float _meanStress;
+    private int _memoryReactivations;
+    private int _stableConnections;
+    private float _meanConsolidation;
 
     public NetworkConfig Config { get; }
     public long Steps { get; private set; }
@@ -249,6 +258,8 @@ public sealed partial class AdaptiveNetwork
         }
 
         float lr = Math.Clamp(Config.LearningRate, 0f, 0.03f);
+        int stable = 0;
+        float stabilitySum = 0f;
         for (int i = 0; i < count; i++)
         {
             Neuron from = _neurons[i];
@@ -257,14 +268,25 @@ public sealed partial class AdaptiveNetwork
             {
                 Synapse edge = from.Outgoing[j];
                 float targetActivity = _neurons[edge.To].NextActivity;
+                // Repeated distinct coactivation episodes strengthen a local stability trace.
+                // Stable synapses are less plastic and resist pruning; they do not imply semantic memory.
+                if (Config.MemoryConsolidation && edge.Memory.Observe(source, targetActivity, edge.Weight,
+                    Steps, Config.MemoryActivationThreshold, Config.ConsolidationRate, Config.MemoryDecayRate))
+                    _memoryReactivations++;
                 float hebbian = source * targetActivity - 0.18f * source * (1f - targetActivity);
-                edge.Weight = Math.Clamp(edge.Weight + lr * (hebbian - 0.025f * edge.Weight), MinWeight, MaxWeight);
+                float effectiveRate = lr * (1f - 0.75f * edge.Memory.Stability);
+                edge.Weight = Math.Clamp(edge.Weight + effectiveRate * (hebbian - 0.025f * edge.Weight), MinWeight, MaxWeight);
                 edge.Utility = edge.Utility * 0.99f + MathF.Abs(source * targetActivity * edge.Weight) * 0.01f;
+                if (edge.Memory.IsStable) stable++;
+                stabilitySum += edge.Memory.Stability;
             }
         }
         for (int i = 0; i < count; i++) _neurons[i].Activity = _neurons[i].NextActivity;
         _meanActivity = activitySum / count;
         _meanStress = stressSum / count;
+        _stableConnections = stable;
+        _meanConsolidation = _connections > 0 ? stabilitySum / _connections : 0f;
+        ObserveGroupSignals(sensors);
 
         if (Config.StructuralPlasticity && Steps % 90 == 0) AdaptStructure();
         if (Config.StructuralPlasticity && Steps % 360 == 0) Prune();
@@ -347,7 +369,7 @@ public sealed partial class AdaptiveNetwork
             {
                 Synapse edge = edges[j];
                 if (Steps - edge.CreatedAt < 360) continue;
-                if (MathF.Abs(edge.Weight) < 0.035f || edge.Utility < 0.0018f)
+                if (!edge.Memory.IsStable && (MathF.Abs(edge.Weight) < 0.035f || edge.Utility < 0.0018f))
                 {
                     edges.RemoveAt(j);
                     _connections--;
@@ -386,9 +408,10 @@ public sealed partial class AdaptiveNetwork
             new NetworkMetrics(_neurons.Count, _connections, _births, _linksAdded,
                 _linksPruned, MathF.Round(_meanActivity, 4), MathF.Round(_meanStress, 4), Steps,
                 _inputs.Count, _outputs.Count, _structures.Count, _inputBirths, _outputBirths,
-                _structureBirths, _portsRetired),
+                _structureBirths, _portsRetired, _stableConnections, _memoryReactivations,
+                MathF.Round(_meanConsolidation, 4)),
             nodes is null ? null : SnapshotPorts(_inputs),
             nodes is null ? null : SnapshotPorts(_outputs),
-            nodes is null ? null : SnapshotStructures());
+            nodes is null ? null : SnapshotStructures(), SnapshotMemoryGroups());
     }
 }

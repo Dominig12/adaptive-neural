@@ -10,7 +10,7 @@
 <body>
   <div class="shell">
     <header class="header">
-      <div class="identity"><span class="identity-mark">A<span>·</span>N</span><div><h1>Adaptive Neural</h1><p>Лаборатория структурной нейропластичности · прототип 0.2</p></div></div>
+      <div class="identity"><span class="identity-mark">A<span>·</span>N</span><div><h1>Adaptive Neural</h1><p>Лаборатория структурной нейропластичности · прототип 0.3</p></div></div>
       <div class="header-controls">
         <span class="connection" id="connection"><span class="dot"></span> Подключение…</span>
         <button id="play" class="button primary" type="button">Пауза</button>
@@ -28,6 +28,7 @@
       <div class="metric"><span>Локальное напряжение</span><strong id="m-stress">—</strong><small>отклонение от фоновой активности</small></div>
       <div class="metric"><span>Шагов модели</span><strong id="m-steps">—</strong><small>30 шагов/с при 1×</small></div>
       <div class="metric"><span>Входы / выходы</span><strong id="m-ports">—</strong><small id="m-port-births">Виртуальные каналы</small></div>
+      <div class="metric"><span>Закреплённые связи</span><strong id="m-memory">—</strong><small id="m-memory-strength">Консолидация 0.000</small></div>
       <div class="metric"><span>Нейронные структуры</span><strong id="m-structures">—</strong><small id="m-structure-births">Новые ансамбли</small></div>
     </div>
 
@@ -46,7 +47,7 @@
     </main>
 
     <div class="lower">
-      <section class="panel chart-panel"><div class="panel-title"><div><span class="eyebrow">03 / Телеметрия</span><h2>Динамика состояния</h2></div><div class="legend"><span><i class="line activity-line"></i> Активность</span><span><i class="line stress-line"></i> Напряжение</span></div></div><div class="chart-wrap"><canvas id="chart" aria-label="История активности и напряжения"></canvas></div></section>
+      <section class="panel chart-panel"><div class="panel-title"><div><span class="eyebrow">03 / Телеметрия</span><h2>Динамика состояния</h2></div><div class="legend"><span><i class="line activity-line"></i> Активность</span><span><i class="line stress-line"></i> Напряжение</span><span><i class="line memory-line"></i> Консолидация</span></div></div><div class="chart-wrap"><canvas id="chart" aria-label="История активности и напряжения"></canvas></div></section>
       <section class="panel settings-panel"><div class="panel-title"><div><span class="eyebrow">04 / Параметры</span><h2>Правила адаптации</h2></div></div>
         <div class="slider-row"><div><label for="target">Целевая активность</label><output id="target-v">0.170</output></div><input id="target" type="range" min="0.03" max="0.65" step="0.005" value="0.17"></div>
         <div class="slider-row"><div><label for="learning">Скорость пластичности</label><output id="learning-v">0.0030</output></div><input id="learning" type="range" min="0" max="0.03" step="0.0005" value="0.003"></div>
@@ -54,6 +55,8 @@
         <label class="switch-row"><input id="structural" type="checkbox" checked> Структурная пластичность</label>
         <label class="switch-row"><input id="adaptive-interfaces" type="checkbox" checked> Эволюция входов и выходов</label>
         <label class="switch-row"><input id="adaptive-structures" type="checkbox" checked> Образование новых ансамблей</label>
+        <label class="switch-row"><input id="memory-consolidation" type="checkbox" checked> Консолидация повторяющейся активности</label>
+        <div class="slider-row"><div><label for="memory-threshold">Порог совместного возбуждения</label><output id="memory-threshold-v">0.260</output></div><input id="memory-threshold" type="range" min="0.10" max="0.80" step="0.01" value="0.26"></div>
         <div class="slider-row"><div><label for="interface-growth">Порог изменения интерфейсов</label><output id="interface-growth-v">0.075</output></div><input id="interface-growth" type="range" min="0.005" max="0.3" step="0.005" value="0.075"></div>
         <div class="slider-row"><div><label for="structure-growth">Порог рождения ансамблей</label><output id="structure-growth-v">0.085</output></div><input id="structure-growth" type="range" min="0.005" max="0.3" step="0.005" value="0.085"></div>
         <div class="hint">Параметры меняются на лету. Для другого начального размера сети используй API или перезапуск.</div>
@@ -67,6 +70,20 @@
       </section>
       <section class="panel ecology"><div class="panel-title"><div><span class="eyebrow">06 / Самоорганизация</span><h2>Рождающиеся ансамбли</h2></div></div>
         <div id="structures-list" class="structures-list"></div><p class="panel-note">Новый ансамбль образуется отделением совместно активных нейронов с локальным нейрогенезом и связями. Это ещё не доказательство самостоятельного возникновения понятий.</p>
+      </section>
+    </section>
+    <section class="memory-panels">
+      <section class="panel memory-panel">
+        <div class="panel-title"><div><span class="eyebrow">07 / Консолидация</span><h2>Следы памяти по ансамблям</h2></div></div>
+        <div id="memory-groups" class="memory-groups"></div>
+        <p class="panel-note">Устойчивость связи растёт после нескольких отдельных эпизодов совместного возбуждения, снижает её пластичность и защищает от прунинга. Сенсорная корреляция — описательная метрика, а не доказанная специализация.</p>
+      </section>
+      <section class="panel memory-panel">
+        <div class="panel-title"><div><span class="eyebrow">08 / Контрольный эксперимент</span><h2>Повторение против перемешивания</h2></div><button id="run-memory-experiment" type="button" class="button">Запустить сравнение</button></div>
+        <div class="benchmark-note" id="memory-experiment-status">Два независимых экземпляра с одним seed: повторяется одна пара сенсоров или подаются случайные пары с равной энергией. Изменения в текущей симуляции не вносятся.</div>
+        <div class="memory-chart-wrap"><canvas id="memory-chart" aria-label="Сравнение консолидации при повторяемом и перемешанном опыте"></canvas></div>
+        <div class="benchmark-summary" id="memory-experiment-summary">Запусти эксперимент, чтобы сравнить число стабилизированных связей по эпизодам.</div>
+        <p class="panel-note">Отчёт показывает изменения структуры памяти и отклик на знакомый стимул. Рост числа стабильных связей сам по себе не доказывает запоминание или понимание.</p>
       </section>
     </section>
     <footer>Экспериментальная модель · Hebbian-пластичность · Гомеостаз · Разреженный граф · Детерминированный seed 1337</footer>
