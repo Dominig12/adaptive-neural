@@ -168,7 +168,8 @@ Check(visibleWorld.SampleSensors()[6] > 0f || visibleWorld.SampleSensors()[7] > 
     visibleWorld.SampleSensors()[8] > 0f, "wide field of view detects rear refuge");
 Check(visibleWorld.Snapshot().Objects.Length == 3,
     "spawned object varieties survive world snapshots");
-var worldTwin1 = new ForagerWorld(22), worldTwin2 = new ForagerWorld(22);
+var worldTwin1 = new ForagerWorld(22);
+var worldTwin2 = new ForagerWorld(22);
 for (int t = 0; t < 300; t++)
 {
     float[] action = [0.3f, 0.7f, 0.8f];
