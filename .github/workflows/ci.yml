@@ -1,0 +1,14 @@
+name: Build and smoke tests
+on:
+  push:
+  pull_request:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet build src/AdaptiveNeural.Server -c Release
+      - run: dotnet run --project tests/AdaptiveNeural.Tests -c Release

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Adaptive Neural — исследовательская лаборатория</title>
+  <link rel="stylesheet" href="/app.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="header">
+      <div class="identity"><span class="identity-mark">A<span>·</span>N</span><div><h1>Adaptive Neural</h1><p>Лаборатория структурной нейропластичности · прототип 0.1</p></div></div>
+      <div class="header-controls">
+        <span class="connection" id="connection"><span class="dot"></span> Подключение…</span>
+        <button id="play" class="button primary" type="button">Пауза</button>
+        <button id="step" class="button" type="button" title="Один шаг моделирования">Шаг</button>
+        <button id="reset" class="button" type="button">Сброс</button>
+        <label class="speed-label" for="speed">Скорость</label>
+        <select id="speed" aria-label="Скорость моделирования"><option value="1">1×</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select>
+      </div>
+    </header>
+
+    <div class="metrics" aria-live="polite">
+      <div class="metric"><span>Нейроны</span><strong id="m-neurons">—</strong><small id="m-born">+0 новых</small></div>
+      <div class="metric"><span>Синапсы</span><strong id="m-connections">—</strong><small id="m-pruned">0 удалено</small></div>
+      <div class="metric"><span>Средняя активность</span><strong id="m-activity">—</strong><small>нормированная 0…1</small></div>
+      <div class="metric"><span>Локальное напряжение</span><strong id="m-stress">—</strong><small>отклонение от фоновой активности</small></div>
+      <div class="metric"><span>Шагов модели</span><strong id="m-steps">—</strong><small>30 шагов/с при 1×</small></div>
+    </div>
+
+    <main class="dashboard">
+      <section class="panel neural-panel">
+        <div class="panel-title"><div><span class="eyebrow">01 / Структура</span><h2>Нейронная сеть</h2></div><div class="legend"><span><i class="c-sensor"></i> Сенсоры</span><span><i class="c-neuron"></i> Внутренние</span><span><i class="c-motor"></i> Моторы</span></div></div>
+        <div class="canvas-wrap neural-wrap"><canvas id="neural" aria-label="Динамический граф нейронов"></canvas><div class="canvas-tag" id="graph-indicator">ЛКМ: импульс · перетаскивание: панорама · колесо: масштаб</div><div class="canvas-corner" id="graph-zoom">100%</div></div>
+        <p class="panel-note">Нажми в области сети, чтобы создать локальный импульс. Активные группы меняют связи; при устойчивой нагрузке могут появиться новые нейроны.</p>
+      </section>
+      <section class="panel world-panel">
+        <div class="panel-title"><div><span class="eyebrow">02 / Обратная связь</span><h2>Мир агента</h2></div><div class="world-control"><label for="spawnMode">Добавить</label><select id="spawnMode"><option value="food">Питание</option><option value="hazard">Опасность</option></select></div></div>
+        <div class="canvas-wrap world-wrap"><canvas id="world" aria-label="Двумерный мир агента"></canvas><div class="canvas-tag">Нажми, чтобы добавить объект в мир</div></div>
+        <div class="world-stats"><span>Энергия <strong id="energy">—</strong></span><div class="energy-track"><div id="energy-bar"></div></div><span>Собрано <strong id="food-collected">0</strong></span></div>
+        <p class="panel-note">Сенсоры мира подают сигналы в сеть, а моторные нейроны управляют движением. Движение и сбор ресурсов ещё не означают обученного поведения.</p>
+      </section>
+    </main>
+
+    <div class="lower">
+      <section class="panel chart-panel"><div class="panel-title"><div><span class="eyebrow">03 / Телеметрия</span><h2>Динамика состояния</h2></div><div class="legend"><span><i class="line activity-line"></i> Активность</span><span><i class="line stress-line"></i> Напряжение</span></div></div><div class="chart-wrap"><canvas id="chart" aria-label="История активности и напряжения"></canvas></div></section>
+      <section class="panel settings-panel"><div class="panel-title"><div><span class="eyebrow">04 / Параметры</span><h2>Правила адаптации</h2></div></div>
+        <div class="slider-row"><div><label for="target">Целевая активность</label><output id="target-v">0.170</output></div><input id="target" type="range" min="0.03" max="0.65" step="0.005" value="0.17"></div>
+        <div class="slider-row"><div><label for="learning">Скорость пластичности</label><output id="learning-v">0.0030</output></div><input id="learning" type="range" min="0" max="0.03" step="0.0005" value="0.003"></div>
+        <div class="slider-row"><div><label for="growth">Порог структурного роста</label><output id="growth-v">0.055</output></div><input id="growth" type="range" min="0.01" max="0.25" step="0.005" value="0.055"></div>
+        <label class="switch-row"><input id="structural" type="checkbox" checked> Структурная пластичность</label>
+        <div class="hint">Параметры меняются на лету. Для другого начального размера сети используй API или перезапуск.</div>
+      </section>
+    </div>
+    <footer>Экспериментальная модель · Hebbian-пластичность · Гомеостаз · Разреженный граф · Детерминированный seed 1337</footer>
+  </div>
+</body>
+</html>
