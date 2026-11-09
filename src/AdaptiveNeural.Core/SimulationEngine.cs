@@ -9,7 +9,9 @@ public sealed record ControlRequest(string? Action = null, int? Speed = null, in
     int? MaximumStructures = null, float? InterfaceGrowthThreshold = null,
     float? StructureGrowthThreshold = null, bool? MemoryConsolidation = null,
     float? MemoryActivationThreshold = null, float? ConsolidationRate = null,
-    float? VisionRange = null, float? FieldOfViewDegrees = null, string? Course = null);
+    float? VisionRange = null, float? FieldOfViewDegrees = null, string? Course = null,
+    bool? MetabolismEnabled = null, float? ResourceSupplyRate = null,
+    bool? ReinforcementEnabled = null, float? ReinforcementRate = null);
 public sealed record StimulusRequest(float X, float Y, float Strength = 2.4f);
 public sealed record SpawnRequest(float X, float Y, bool Hazard = false, string? Kind = null);
 
@@ -32,7 +34,13 @@ public sealed class SimulationEngine
     private void TickUnsafe()
     {
         _network.Step(_world.SampleSensors());
-        _world.Step(_network.ReadMotors());
+        WorldOutcome outcome = _world.Step(_network.ReadMotors());
+        // Environmental valence follows the action; it is not a direct motor command.
+        float feedback = outcome.Food > 0 ? 1f : 0f;
+        if (outcome.HazardContact) feedback -= 0.08f;
+        if (outcome.Collision) feedback -= 0.018f;
+        _network.Reinforce(Math.Clamp(feedback, -1f, 1f));
+        _network.Feed(_world.Energy, outcome.Food);
     }
 
     public void Tick()
@@ -68,6 +76,16 @@ public sealed class SimulationEngine
                 _config.LearningRate = _network.Config.LearningRate = Math.Clamp(request.LearningRate.Value, 0f, 0.03f);
             if (request.GrowthThreshold.HasValue && float.IsFinite(request.GrowthThreshold.Value))
                 _config.GrowthThreshold = _network.Config.GrowthThreshold = Math.Clamp(request.GrowthThreshold.Value, 0.01f, 0.25f);
+            if (request.MetabolismEnabled.HasValue)
+                _config.MetabolismEnabled = _network.Config.MetabolismEnabled = request.MetabolismEnabled.Value;
+            if (request.ResourceSupplyRate.HasValue && float.IsFinite(request.ResourceSupplyRate.Value))
+                _config.ResourceSupplyRate = _network.Config.ResourceSupplyRate =
+                    Math.Clamp(request.ResourceSupplyRate.Value, 0f, 2f);
+            if (request.ReinforcementEnabled.HasValue)
+                _config.ReinforcementEnabled = _network.Config.ReinforcementEnabled = request.ReinforcementEnabled.Value;
+            if (request.ReinforcementRate.HasValue && float.IsFinite(request.ReinforcementRate.Value))
+                _config.ReinforcementRate = _network.Config.ReinforcementRate =
+                    Math.Clamp(request.ReinforcementRate.Value, 0f, 0.3f);
             if (request.StructuralPlasticity.HasValue)
                 _config.StructuralPlasticity = _network.Config.StructuralPlasticity = request.StructuralPlasticity.Value;
             if (request.AdaptiveInterfaces.HasValue)

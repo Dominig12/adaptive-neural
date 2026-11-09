@@ -267,3 +267,49 @@ engine.Apply(new ControlRequest(Action: "reset"));
 Check(engine.Snapshot(-1).World.Course == "lower" &&
       engine.Snapshot(-1).Network.Metrics.Steps == 0,
     "full reset preserves route selection and resets network");
+
+// v0.6: resource reserve pays for maintenance and growth, and deprivation
+// produces measurable atrophy without removing primary physical interfaces.
+var hungryConfig = new NetworkConfig
+{
+    Seed = 928, InitialResource = 0f, ResourceSupplyRate = 0f,
+    AdaptiveInterfaces = false, AdaptiveStructures = false
+};
+var hungry = new AdaptiveNetwork(hungryConfig);
+int beforeStarveEdges = hungry.ConnectionCount;
+for (int i = 0; i < 700; i++) hungry.Step(new float[ForagerWorld.SensorChannels]);
+var starved = hungry.Snapshot(-1);
+Check(hungry.Resource == 0f && starved.Metrics.StarvationTicks >= 600,
+    "starvation begins when reserve cannot cover ongoing maintenance");
+Check(starved.Metrics.AtrophyEvents > 0 && hungry.ConnectionCount < beforeStarveEdges &&
+      hungry.DormantNeuronCount > 0, "starvation prunes edges and deactivates internal neurons");
+Check(hungry.InputPortCount == ForagerWorld.SensorChannels && hungry.OutputPortCount == 3 &&
+      starved.Activities.All(float.IsFinite), "starvation preserves primary sensory and motor channels");
+var fed = new AdaptiveNetwork(new NetworkConfig { InitialResource = 0f });
+fed.Feed(1f, 3);
+Check(fed.Resource > 0f && fed.Resource <= fed.Config.ResourceCapacity,
+    "nutrition replenishes structural resource, respecting reserve capacity");
+
+var eligibilityA = new AdaptiveNetwork(new NetworkConfig { Seed = 484 });
+var eligibilityB = new AdaptiveNetwork(new NetworkConfig { Seed = 484 });
+for (int i = 0; i < 42; i++)
+{
+    eligibilityA.Step(highStimulus);
+    eligibilityB.Step(highStimulus);
+}
+eligibilityA.Reinforce(-1f);
+var changedA = eligibilityA.Snapshot(-1);
+var unchangedB = eligibilityB.Snapshot(-1);
+Check(changedA.Edges!.Zip(unchangedB.Edges!, (x, y) => x.Weight != y.Weight).Any(x => x),
+    "aversive outcome modifies eligible recent synapses, not the world action directly");
+Check(changedA.Metrics.LastFeedback == -1f, "outcome valence available in telemetry");
+
+var geneticRequest = new GeneticExperimentRequest(Seed: 391, Population: 4, Generations: 2,
+    StepsPerTrial: 180, WorldTrials: 1);
+var gaA = GeneticExperiment.Run(geneticRequest);
+var gaB = GeneticExperiment.Run(geneticRequest);
+Check(gaA.History.Length == 2 && gaA.History.SequenceEqual(gaB.History),
+    "genetic selection is reproducible for fixed world and network seeds");
+Check(float.IsFinite(gaA.WinnerFitness) && float.IsFinite(gaA.BaselineFitness) &&
+      gaA.WinnerFitness >= gaA.BaselineFitness - 0.0001f,
+    "elitist selection retains baseline genome and reports finite fitness");

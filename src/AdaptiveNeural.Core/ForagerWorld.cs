@@ -5,9 +5,13 @@ public sealed record WorldView(float X, float Y, float Heading, float Energy, in
     float[] Sensors, float[] Motors, WorldObjectView[] Objects,
     float VisionRange, float EffectiveVisionRange, float FieldOfViewDegrees,
     float Daylight, float AmbientTemperature, float Exposure, int VisibleObjects, int Collisions,
-    string Course, float GoalDistance, float BestGoalDistance, float DistanceTravelled);
+    string Course, float GoalDistance, float BestGoalDistance, float DistanceTravelled, int HazardContacts);
 
 public enum SpatialCourse { Upper, Lower }
+
+public sealed record WorldOutcome(int Food, bool HazardContact, bool Collision,
+    float EnergyChange);
+
 
 /// <summary>
 /// Deterministic continuous 2D environment. Only objects within a vision cone and
@@ -36,6 +40,7 @@ public sealed class ForagerWorld
     private readonly float[] _motors = new float[3];
     private long _steps;
     private int _collisions;
+    private int _hazardContacts;
     private int _visibleObjects;
     private bool _fixedCourse;
     private string _course = "sandbox";
@@ -58,6 +63,7 @@ public sealed class ForagerWorld
     public float AmbientTemperature { get; private set; }
     public float Exposure { get; private set; }
     public int Collisions => _collisions;
+    public int HazardContacts => _hazardContacts;
     public float EffectiveVisionRange => VisionRange * (0.28f + Daylight * 0.72f);
 
     public ForagerWorld(int seed, bool populate = true)
@@ -87,7 +93,7 @@ public sealed class ForagerWorld
         _course = layout == SpatialCourse.Upper ? "upper" : "lower";
         X = -0.77f; Y = 0f; Heading = 0f;
         Energy = 0.85f; FoodCollected = 0;
-        _steps = 0; _collisions = 0; _distanceTravelled = 0f;
+        _steps = 0; _collisions = 0; _hazardContacts = 0; _distanceTravelled = 0f;
         _bestGoalDistance = GoalDistance;
         Array.Clear(_motors);
         float opening = layout == SpatialCourse.Upper ? -0.39f : 0.39f;
@@ -240,10 +246,13 @@ public sealed class ForagerWorld
         Exposure = Math.Clamp(MathF.Abs(AmbientTemperature) * (1f - protection * 0.85f), 0f, 1f);
     }
 
-    public void Step(float[] motors, float dt = 1f / 30f)
+    public WorldOutcome Step(float[] motors, float dt = 1f / 30f)
     {
         if (motors.Length != 3) throw new ArgumentException("Expected three motor channels.", nameof(motors));
         _steps++;
+        float beforeEnergy = Energy;
+        int beforeFood = FoodCollected;
+        bool danger = false;
         Array.Copy(motors, _motors, 3);
         float left = Math.Clamp(float.IsFinite(motors[0]) ? motors[0] : 0f, 0f, 1f);
         float right = Math.Clamp(float.IsFinite(motors[1]) ? motors[1] : 0f, 0f, 1f);
@@ -281,7 +290,11 @@ public sealed class ForagerWorld
             WorldObject item = _objects[i];
             float dx = X - item.X, dy = Y - item.Y;
             if (dx * dx + dy * dy > (AgentRadius + item.Radius) * (AgentRadius + item.Radius)) continue;
-            if (item.Kind == "hazard") Energy = Math.Clamp(Energy - dt * 0.22f, 0f, 1f);
+            if (item.Kind == "hazard")
+            {
+                danger = true;
+                Energy = Math.Clamp(Energy - dt * 0.22f, 0f, 1f);
+            }
             if (item.Kind == "food")
             {
                 Energy = Math.Clamp(Energy + 0.19f, 0f, 1f);
@@ -291,12 +304,14 @@ public sealed class ForagerWorld
             }
             if (item.Kind == "shelter") Energy = Math.Clamp(Energy + dt * 0.012f, 0f, 1f);
         }
+        if (danger) _hazardContacts++;
         SampleSensors();
+        return new WorldOutcome(FoodCollected - beforeFood, danger, blocked, Energy - beforeEnergy);
     }
 
     public WorldView Snapshot() => new(X, Y, Heading, Energy, FoodCollected,
         (float[])_sensors.Clone(), (float[])_motors.Clone(),
         _objects.Select(o => new WorldObjectView(o.X, o.Y, o.Kind == "hazard", o.Kind, o.Radius, InSight(o))).ToArray(),
         VisionRange, EffectiveVisionRange, FieldOfViewDegrees, Daylight, AmbientTemperature,
-        Exposure, _visibleObjects, _collisions, _course, GoalDistance, _bestGoalDistance, _distanceTravelled);
+        Exposure, _visibleObjects, _collisions, _course, GoalDistance, _bestGoalDistance, _distanceTravelled, _hazardContacts);
 }

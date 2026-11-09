@@ -56,3 +56,5 @@
 .spatial-numbers{font-size:11px;line-height:1.55;color:#9db2c8;padding-top:8px}
 #spatial-history{margin:3px 19px 10px}
 .world-control{flex-wrap:wrap}
+
+#genetic-results{line-height:1.75;white-space:pre-wrap}

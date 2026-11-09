@@ -29,6 +29,8 @@
       <div class="metric"><span>Шагов модели</span><strong id="m-steps">—</strong><small>30 шагов/с при 1×</small></div>
       <div class="metric"><span>Входы / выходы</span><strong id="m-ports">—</strong><small id="m-port-births">Виртуальные каналы</small></div>
       <div class="metric"><span>Закреплённые связи</span><strong id="m-memory">—</strong><small id="m-memory-strength">Консолидация 0.000</small></div>
+      <div class="metric"><span>Ресурс сети</span><strong id="m-resource">—</strong><small id="m-resource-detail">Запас и содержание</small></div>
+      <div class="metric"><span>Деградация</span><strong id="m-atrophy">—</strong><small id="m-atrophy-detail">Неактивные нейроны</small></div>
       <div class="metric"><span>Нейронные структуры</span><strong id="m-structures">—</strong><small id="m-structure-births">Новые ансамбли</small></div>
     </div>
 
@@ -42,7 +44,7 @@
         <div class="panel-title"><div><span class="eyebrow">02 / Обратная связь</span><h2>Мир агента</h2></div><div class="world-control"><label for="courseMode">Маршрут</label><select id="courseMode"><option value="sandbox">Свободный мир</option><option value="upper">Проход сверху</option><option value="lower">Проход снизу</option></select><label for="spawnMode">Добавить</label><select id="spawnMode"><option value="food">Питание</option><option value="hazard">Опасность</option><option value="rock">Препятствие</option><option value="shelter">Укрытие</option></select></div></div>
         <div class="canvas-wrap world-wrap"><canvas id="world" aria-label="Двумерный мир агента"></canvas><div class="canvas-tag">Нажми, чтобы добавить объект в мир</div></div>
         <div class="world-stats"><span>Энергия <strong id="energy">—</strong></span><div class="energy-track"><div id="energy-bar"></div></div><span>Собрано <strong id="food-collected">0</strong></span></div>
-        <div class="world-env"><span>Освещение <strong id="world-light">—</strong></span><span>Температура <strong id="world-temp">—</strong></span><span>Видимых объектов <strong id="world-visible">—</strong></span><span>Столкновений <strong id="world-collisions">—</strong></span><span>До цели <strong id="world-goal">—</strong></span><span>Лучшее приближение <strong id="world-best">—</strong></span></div>
+        <div class="world-env"><span>Освещение <strong id="world-light">—</strong></span><span>Температура <strong id="world-temp">—</strong></span><span>Видимых объектов <strong id="world-visible">—</strong></span><span>Столкновений <strong id="world-collisions">—</strong></span><span>Контактов с опасностью <strong id="world-hazards">—</strong></span><span>До цели <strong id="world-goal">—</strong></span><span>Лучшее приближение <strong id="world-best">—</strong></span></div>
         <div class="world-vision"><div class="slider-row"><div><label for="vision-angle">Угол обзора</label><output id="vision-angle-v">140°</output></div><input id="vision-angle" type="range" min="40" max="360" step="10" value="140"></div>
         <div class="slider-row"><div><label for="vision-range">Дальность зрения</label><output id="vision-range-v">0.95</output></div><input id="vision-range" type="range" min="0.25" max="1.6" step="0.05" value="0.95"></div></div>
         <div class="world-sensor-list" id="world-sensors" aria-label="Состояние физических сенсоров"></div>
@@ -56,6 +58,10 @@
         <div class="slider-row"><div><label for="target">Целевая активность</label><output id="target-v">0.170</output></div><input id="target" type="range" min="0.03" max="0.65" step="0.005" value="0.17"></div>
         <div class="slider-row"><div><label for="learning">Скорость пластичности</label><output id="learning-v">0.0030</output></div><input id="learning" type="range" min="0" max="0.03" step="0.0005" value="0.003"></div>
         <div class="slider-row"><div><label for="growth">Порог структурного роста</label><output id="growth-v">0.055</output></div><input id="growth" type="range" min="0.01" max="0.25" step="0.005" value="0.055"></div>
+        <label class="switch-row"><input id="metabolism-enabled" type="checkbox" checked> Метаболизм и деградация сети</label>
+        <div class="slider-row"><div><label for="resource-supply">Питание структурного резерва</label><output id="resource-supply-v">0.160</output></div><input id="resource-supply" type="range" min="0" max="0.5" step="0.01" value="0.16"></div>
+        <label class="switch-row"><input id="reinforcement-enabled" type="checkbox" checked> Подкрепление по результатам действий</label>
+        <div class="slider-row"><div><label for="reinforcement-rate">Сила подкрепления</label><output id="reinforcement-rate-v">0.045</output></div><input id="reinforcement-rate" type="range" min="0" max="0.2" step="0.005" value="0.045"></div>
         <label class="switch-row"><input id="structural" type="checkbox" checked> Структурная пластичность</label>
         <label class="switch-row"><input id="adaptive-interfaces" type="checkbox" checked> Эволюция входов и выходов</label>
         <label class="switch-row"><input id="adaptive-structures" type="checkbox" checked> Образование новых ансамблей</label>
@@ -104,6 +110,14 @@
       <div id="spatial-results" class="spatial-results"></div>
       <div id="spatial-history" class="benchmark-summary"></div>
       <p class="panel-note">Во время проверки изменение весов и рост сети отключены. Показатели: достижение пищи, минимальное расстояние до цели, столкновения, длина пути и остаток энергии. Улучшение не гарантируется; отсутствие переноса — полноценный результат эксперимента. Контроль без пластичности не уравнивает все сенсорные траектории агентов.</p>
+    </section>
+    <section class="panel retention-panel" style="margin-top:15px">
+      <div class="panel-title"><div><span class="eyebrow">11 / Генетический поиск</span><h2>Отбор наследуемых параметров</h2></div><button type="button" class="button" id="run-genetic-experiment">Запустить отбор</button></div>
+      <div class="retention-controls"><label>Популяция <input id="genetic-population" type="number" min="4" max="16" value="6"></label>
+      <label>Поколения <input id="genetic-generations" type="number" min="1" max="10" value="3"></label>
+      <label>Шагов на испытание <input id="genetic-steps" type="number" min="180" max="1200" step="10" value="450"></label></div>
+      <p id="genetic-status" class="benchmark-note">Каждый геном задаёт параметры пластичности и моторные коэффициенты. Популяция оценивается в одинаковых мирах; наследуются параметры, но не приобретённые связи.</p>
+      <div id="genetic-results" class="benchmark-summary">Результаты отбора появятся здесь. Fitness не является доказательством обучения.</div>
     </section>
     <footer>Экспериментальная модель · Hebbian-пластичность · Гомеостаз · Разреженный граф · Детерминированный seed 1337</footer>
   </div>

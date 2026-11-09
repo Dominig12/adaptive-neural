@@ -69,7 +69,8 @@ public sealed partial class AdaptiveNetwork
         }
         float[] result = new float[MotorCount];
         for (int i = 0; i < MotorCount; i++)
-            result[i] = gains[i] > 0f ? Math.Clamp(sums[i] / gains[i], 0f, 1f) : 0f;
+            result[i] = gains[i] > 0f ? Math.Clamp(sums[i] / gains[i] *
+                (i == 0 ? Config.LeftMotorGain : i == 1 ? Config.RightMotorGain : Config.ThrustMotorGain), 0f, 1f) : 0f;
         return result;
     }
 
@@ -87,6 +88,7 @@ public sealed partial class AdaptiveNetwork
                 if (_inputs[i].Usage > parent.Usage) parent = _inputs[i];
             int second = (parent.Channel + 1 + _random.Next(SensorCount - 1)) % SensorCount;
             Neuron anchor = _neurons[parent.NeuronId];
+            if (!SpendForGrowth(NeuronGrowthCost + PortGrowthCost)) return;
             int id = AddNeuron(0, NeuronRole.Sensor,
                 Math.Clamp(anchor.X + 0.035f, -0.98f, 0.98f),
                 Math.Clamp(anchor.Y + (float)(_random.NextDouble() - 0.5) * 0.12f, -0.95f, 0.95f));
@@ -109,6 +111,7 @@ public sealed partial class AdaptiveNetwork
         if (feeder < 0) return;
         int channel = _random.Next(MotorCount);
         Neuron anchorMotor = _neurons[_motorIds[channel]];
+        if (!SpendForGrowth(NeuronGrowthCost + PortGrowthCost)) return;
         int motorId = AddNeuron(5, NeuronRole.Motor,
             Math.Clamp(anchorMotor.X - 0.035f, -0.98f, 0.98f),
             Math.Clamp(anchorMotor.Y + (float)(_random.NextDouble() - 0.5) * 0.12f, -0.95f, 0.95f));
@@ -126,11 +129,11 @@ public sealed partial class AdaptiveNetwork
 
     private int FindAvailableFeeder(int focalId)
     {
-        if (_neurons[focalId].Outgoing.Count < Config.MaximumOutgoing) return focalId;
+        if (!_neurons[focalId].Dormant && _neurons[focalId].Outgoing.Count < Config.MaximumOutgoing) return focalId;
         for (int i = 0; i < 48; i++)
         {
             int id = _random.Next(_neurons.Count);
-            if (_neurons[id].Role == NeuronRole.Internal &&
+            if (_neurons[id].Role == NeuronRole.Internal && !_neurons[id].Dormant &&
                 _neurons[id].Outgoing.Count < Config.MaximumOutgoing) return id;
         }
         return -1;
@@ -145,7 +148,7 @@ public sealed partial class AdaptiveNetwork
         {
             int id = _random.Next(_neurons.Count);
             Neuron n = _neurons[id];
-            if (id == focalId || n.Role != NeuronRole.Internal) continue;
+            if (id == focalId || n.Role != NeuronRole.Internal || n.Dormant) continue;
             float distance = (n.X - focal.X) * (n.X - focal.X) +
                 (n.Y - focal.Y) * (n.Y - focal.Y) + MathF.Abs(n.Activity - focal.Activity) * 0.1f;
             if (distance < bestDistance) { bestId = id; bestDistance = distance; }
@@ -166,7 +169,7 @@ public sealed partial class AdaptiveNetwork
         int groupSize = 0;
         foreach (Neuron n in _neurons)
         {
-            if (n.Role != NeuronRole.Internal || n.Group != group) continue;
+            if (n.Role != NeuronRole.Internal || n.Group != group || n.Dormant) continue;
             groupSize++;
             if (n.Id == focalId) continue;
             float distance = (n.X - focal.X) * (n.X - focal.X) +
@@ -177,6 +180,7 @@ public sealed partial class AdaptiveNetwork
         if (groupSize < 12 || neighbors.Count < 4) return false;
         neighbors.Sort((a, b) => a.Score.CompareTo(b.Score));
 
+        if (!SpendForGrowth(StructureGrowthCost + NeuronGrowthCost * 2f)) return false;
         int newGroup = _nextStructureId++;
         _structures.Add(newGroup, (group, Steps));
         focal.Group = newGroup;
@@ -224,6 +228,32 @@ public sealed partial class AdaptiveNetwork
             _portsRetired++;
             _topologyVersion++;
         }
+    }
+
+    // Under long-term resource starvation extra interfaces are the first structures lost.
+    private bool RetireOneDerivedPort()
+    {
+        if (_outputs.Count > MotorCount)
+        {
+            AdaptivePort p = _outputs[^1];
+            _outputs.RemoveAt(_outputs.Count - 1);
+            _neurons[p.NeuronId].Role = NeuronRole.Internal;
+            _neurons[p.NeuronId].Group = 4;
+            _portsRetired++;
+            _topologyVersion++;
+            return true;
+        }
+        if (_inputs.Count > SensorCount)
+        {
+            AdaptivePort p = _inputs[^1];
+            _inputs.RemoveAt(_inputs.Count - 1);
+            _neurons[p.NeuronId].Role = NeuronRole.Internal;
+            _neurons[p.NeuronId].Group = 1;
+            _portsRetired++;
+            _topologyVersion++;
+            return true;
+        }
+        return false;
     }
 
     private InterfaceView[] SnapshotPorts(List<AdaptivePort> ports) =>

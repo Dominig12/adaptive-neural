@@ -23,19 +23,32 @@ public sealed class NetworkConfig
     public float MemoryActivationThreshold { get; set; } = 0.26f;
     public float ConsolidationRate { get; set; } = 0.30f;
     public float MemoryDecayRate { get; set; } = 0.00002f;
+    // Metabolism is a separate structural budget, not the world's energy variable.
+    public bool MetabolismEnabled { get; set; } = true;
+    public float ResourceCapacity { get; set; } = 240f;
+    public float InitialResource { get; set; } = 160f;
+    public float ResourceSupplyRate { get; set; } = 0.16f;
+    public bool ReinforcementEnabled { get; set; } = true;
+    public float ReinforcementRate { get; set; } = 0.045f;
+    // Genetic trials can evolve effector transduction without modifying the world.
+    public float LeftMotorGain { get; set; } = 1f;
+    public float RightMotorGain { get; set; } = 1f;
+    public float ThrustMotorGain { get; set; } = 1f;
 
     public NetworkConfig Clone() => (NetworkConfig)MemberwiseClone();
 }
 
 public enum NeuronRole { Sensor, Internal, Motor }
 
-public sealed record NeuronView(int Id, int Group, NeuronRole Role, float X, float Y);
+public sealed record NeuronView(int Id, int Group, NeuronRole Role, float X, float Y, bool Dormant);
 public sealed record EdgeView(int From, int To, float Weight);
 public sealed record NetworkMetrics(int Neurons, int Connections, int Births, int NewConnections,
     int PrunedConnections, float MeanActivity, float MeanStress, long Steps,
     int InputPorts, int OutputPorts, int Structures, int InputBirths, int OutputBirths,
     int StructureBirths, int RetiredPorts, int StableConnections, int MemoryReactivations,
-    float MeanConsolidation);
+    float MeanConsolidation, float Resource, float ResourceCapacity, float Maintenance,
+    float LastIntake, int StarvationTicks, int DormantNeurons, int AtrophyEvents,
+    float GrowthExpenditure, float LastFeedback);
 public sealed record NetworkView(int TopologyVersion, float[] Activities, NeuronView[]? Nodes,
     EdgeView[]? Edges, NetworkMetrics Metrics, InterfaceView[]? Inputs,
     InterfaceView[]? Outputs, StructureView[]? Structures, MemoryGroupView[] MemoryGroups);
@@ -59,6 +72,7 @@ public sealed partial class AdaptiveNetwork
         public float RunningActivity = 0.17f;
         public float Stress;
         public float Threshold = 0.95f;
+        public bool Dormant;
         public readonly List<Synapse> Outgoing = [];
     }
 
@@ -69,6 +83,7 @@ public sealed partial class AdaptiveNetwork
         public float Utility = 0.025f;
         public long CreatedAt;
         public SynapticMemory Memory;
+        public float Eligibility;
     }
 
     private sealed class Pulse
@@ -109,10 +124,18 @@ public sealed partial class AdaptiveNetwork
         Config.MaximumInputPorts = Math.Clamp(Config.MaximumInputPorts, SensorCount, 64);
         Config.MaximumOutputPorts = Math.Clamp(Config.MaximumOutputPorts, MotorCount, 32);
         Config.MaximumStructures = Math.Clamp(Config.MaximumStructures, 4, 32);
+        Config.ResourceCapacity = Math.Clamp(float.IsFinite(Config.ResourceCapacity) ? Config.ResourceCapacity : 240f, 4f, 2000f);
+        Config.InitialResource = Math.Clamp(float.IsFinite(Config.InitialResource) ? Config.InitialResource : 160f, 0f, Config.ResourceCapacity);
+        Config.ResourceSupplyRate = Math.Clamp(float.IsFinite(Config.ResourceSupplyRate) ? Config.ResourceSupplyRate : 0.16f, 0f, 2f);
+        Config.ReinforcementRate = Math.Clamp(float.IsFinite(Config.ReinforcementRate) ? Config.ReinforcementRate : 0.045f, 0f, 0.3f);
+        Config.LeftMotorGain = Math.Clamp(float.IsFinite(Config.LeftMotorGain) ? Config.LeftMotorGain : 1f, 0.1f, 3f);
+        Config.RightMotorGain = Math.Clamp(float.IsFinite(Config.RightMotorGain) ? Config.RightMotorGain : 1f, 0.1f, 3f);
+        Config.ThrustMotorGain = Math.Clamp(float.IsFinite(Config.ThrustMotorGain) ? Config.ThrustMotorGain : 1f, 0.1f, 3f);
         _incoming = new float[Config.MaximumNeurons];
         _random = new Random(Config.Seed);
         Initialize();
         InitializeEvolution();
+        InitializeMetabolism();
     }
 
     private void Initialize()
@@ -184,10 +207,12 @@ public sealed partial class AdaptiveNetwork
     private bool TryConnect(int from, int to, float weight)
     {
         if (from < 0 || to < 0 || from == to || _connections >= Config.MaximumEdges) return false;
+        if (_neurons[from].Dormant || _neurons[to].Dormant) return false;
         Neuron source = _neurons[from];
         if (source.Outgoing.Count >= Config.MaximumOutgoing || source.Role == NeuronRole.Motor) return false;
         foreach (Synapse existing in source.Outgoing)
             if (existing.To == to) return false;
+        if (!SpendForGrowth(SynapseGrowthCost)) return false;
         source.Outgoing.Add(new Synapse { To = to, Weight = Math.Clamp(weight, MinWeight, MaxWeight), CreatedAt = Steps });
         _connections++;
         _linksAdded++;
@@ -210,6 +235,7 @@ public sealed partial class AdaptiveNetwork
     {
         if (sensors.Length != SensorCount) throw new ArgumentException("Unexpected physical sensor channel count.", nameof(sensors));
         Steps++;
+        TickMetabolism();
         int count = _neurons.Count;
         Array.Clear(_incoming, 0, count);
 
@@ -217,6 +243,7 @@ public sealed partial class AdaptiveNetwork
         for (int i = 0; i < count; i++)
         {
             Neuron from = _neurons[i];
+            if (from.Dormant) continue;
             for (int j = 0; j < from.Outgoing.Count; j++)
             {
                 Synapse edge = from.Outgoing[j];
@@ -246,6 +273,12 @@ public sealed partial class AdaptiveNetwork
         for (int i = 0; i < count; i++)
         {
             Neuron n = _neurons[i];
+            if (n.Dormant)
+            {
+                n.Activity = 0f;
+                n.NextActivity = 0f;
+                continue;
+            }
             float drive = Math.Clamp((_incoming[i] - n.Threshold) * 3f, -14f, 14f);
             float response = 1f / (1f + MathF.Exp(-drive));
             n.NextActivity = n.Activity * 0.76f + response * 0.24f;
@@ -263,11 +296,17 @@ public sealed partial class AdaptiveNetwork
         for (int i = 0; i < count; i++)
         {
             Neuron from = _neurons[i];
+            if (from.Dormant) continue;
             float source = from.NextActivity;
             for (int j = 0; j < from.Outgoing.Count; j++)
             {
                 Synapse edge = from.Outgoing[j];
                 float targetActivity = _neurons[edge.To].NextActivity;
+                // Eligibility tracks recently coactive paths; later environmental feedback
+                // is applied to this transient trace instead of all synapses equally.
+                edge.Eligibility = Math.Clamp(edge.Eligibility * 0.93f +
+                    MathF.Max(0f, source - 0.12f) * MathF.Max(0f, targetActivity - 0.12f) *
+                    (from.Role == NeuronRole.Sensor ? 0.15f : _neurons[edge.To].Role == NeuronRole.Motor ? 1f : 0.32f), 0f, 3f);
                 // Repeated distinct coactivation episodes strengthen a local stability trace.
                 // Stable synapses are less plastic and resist pruning; they do not imply semantic memory.
                 if (Config.MemoryConsolidation && edge.Memory.Observe(source, targetActivity, edge.Weight,
@@ -282,8 +321,9 @@ public sealed partial class AdaptiveNetwork
             }
         }
         for (int i = 0; i < count; i++) _neurons[i].Activity = _neurons[i].NextActivity;
-        _meanActivity = activitySum / count;
-        _meanStress = stressSum / count;
+        int living = Math.Max(1, count - _dormantNeurons);
+        _meanActivity = activitySum / living;
+        _meanStress = stressSum / living;
         _stableConnections = stable;
         _meanConsolidation = _connections > 0 ? stabilitySum / _connections : 0f;
         ObserveGroupSignals(sensors);
@@ -309,7 +349,7 @@ public sealed partial class AdaptiveNetwork
             for (int i = SensorCount; i < _neurons.Count; i++)
             {
                 Neuron n = _neurons[i];
-                if (n.Role != NeuronRole.Internal || n.Group != group) continue;
+                if (n.Role != NeuronRole.Internal || n.Group != group || n.Dormant) continue;
                 float need = n.Stress + MathF.Max(0f, n.RunningActivity - Config.TargetActivity);
                 pressure += need;
                 average += n.RunningActivity;
@@ -328,7 +368,7 @@ public sealed partial class AdaptiveNetwork
             for (int sample = 0; sample < Math.Min(48, _neurons.Count); sample++)
             {
                 int id = _random.Next(_neurons.Count);
-                if (id == focal || _neurons[id].Role == NeuronRole.Sensor) continue;
+                if (id == focal || _neurons[id].Role == NeuronRole.Sensor || _neurons[id].Dormant) continue;
                 Neuron candidate = _neurons[id];
                 float dx = candidate.X - center.X, dy = candidate.Y - center.Y;
                 float d = dx * dx + dy * dy;
@@ -347,7 +387,7 @@ public sealed partial class AdaptiveNetwork
 
             // Add a neuron only for persistent high pressure, at most once per group / 270 ticks.
             if (Steps % 270 != 0 || pressure < Config.GrowthThreshold * 1.4f ||
-                _neurons.Count >= Config.MaximumNeurons) continue;
+                _neurons.Count >= Config.MaximumNeurons || !SpendForGrowth(NeuronGrowthCost)) continue;
             float x = Math.Clamp(center.X + (float)(_random.NextDouble() - 0.5) * 0.12f, -0.84f, 0.84f);
             float y = Math.Clamp(center.Y + (float)(_random.NextDouble() - 0.5) * 0.12f, -0.94f, 0.94f);
             int born = AddNeuron(group, NeuronRole.Internal, x, y);
@@ -398,7 +438,7 @@ public sealed partial class AdaptiveNetwork
             for (int i = 0; i < _neurons.Count; i++)
             {
                 Neuron n = _neurons[i];
-                nodes[i] = new NeuronView(n.Id, n.Group, n.Role, n.X, n.Y);
+                nodes[i] = new NeuronView(n.Id, n.Group, n.Role, n.X, n.Y, n.Dormant);
                 foreach (Synapse edge in n.Outgoing)
                     topologyEdges.Add(new EdgeView(i, edge.To, MathF.Round(edge.Weight, 3)));
             }
@@ -409,7 +449,10 @@ public sealed partial class AdaptiveNetwork
                 _linksPruned, MathF.Round(_meanActivity, 4), MathF.Round(_meanStress, 4), Steps,
                 _inputs.Count, _outputs.Count, _structures.Count, _inputBirths, _outputBirths,
                 _structureBirths, _portsRetired, _stableConnections, _memoryReactivations,
-                MathF.Round(_meanConsolidation, 4)),
+                MathF.Round(_meanConsolidation, 4), MathF.Round(_resource, 3),
+                MathF.Round(Config.ResourceCapacity, 3), MathF.Round(_maintenance, 4),
+                MathF.Round(_lastIntake, 4), _starvationTicks, _dormantNeurons,
+                _atrophyEvents, MathF.Round(_growthExpenditure, 3), MathF.Round(_lastFeedback, 4)),
             nodes is null ? null : SnapshotPorts(_inputs),
             nodes is null ? null : SnapshotPorts(_outputs),
             nodes is null ? null : SnapshotStructures(), SnapshotMemoryGroups());

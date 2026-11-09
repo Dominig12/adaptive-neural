@@ -46,6 +46,12 @@ app.MapPost("/api/spatial/experiment", async (SpatialExperimentRequest request) 
     try { return Results.Ok(await Task.Run(() => SpatialExperiment.Run(request))); }
     finally { memoryExperimentGate.Release(); }
 });
+app.MapPost("/api/genetic/experiment", async (GeneticExperimentRequest request) =>
+{
+    if (!await memoryExperimentGate.WaitAsync(0)) return Results.Conflict(new { error = "Experiment already running" });
+    try { return Results.Ok(await Task.Run(() => GeneticExperiment.Run(request))); }
+    finally { memoryExperimentGate.Release(); }
+});
 app.MapGet("/api/health", () => Results.Ok(new { status = "ready" }));
 app.MapFallbackToFile("index.html");
 app.Run();

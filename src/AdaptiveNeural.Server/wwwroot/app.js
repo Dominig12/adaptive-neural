@@ -52,6 +52,7 @@ function drawNetwork() {
   for(let i=0;i<nodes.length;i++){
     const n=nodes[i],a=acts[i]||0,x=ox+n.x*radius,y=oy+n.y*radius,r=n.role===1?2.5:4.3;
     if(x<-10||x>w+10||y<-10||y>h+10)continue;
+    if(n.dormant){ctx.fillStyle='#4a5161';ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();continue;}
     if(a>.37){ctx.fillStyle=`rgba(85,238,191,${Math.min(.22,a*.19)})`;ctx.beginPath();ctx.arc(x,y,r+7*a,0,Math.PI*2);ctx.fill();}
     const color=n.role===0?'#82aeff':n.role===2?'#f0b674':'#59cbb2';
     ctx.globalAlpha=Math.max(.26,Math.min(1,.32+a*1.6));ctx.fillStyle=color;ctx.beginPath();ctx.arc(x,y,r+Math.min(2.6,a*2),0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;
@@ -125,6 +126,10 @@ async function poll(){
     $('m-activity').textContent=n.metrics.meanActivity.toFixed(3);$('m-stress').textContent=n.metrics.meanStress.toFixed(3);$('m-steps').textContent=n.metrics.steps.toLocaleString('ru-RU');
     $('m-ports').textContent=`${n.metrics.inputPorts} / ${n.metrics.outputPorts}`;
     $('m-port-births').textContent=`+${n.metrics.inputBirths} / +${n.metrics.outputBirths} · ${n.metrics.retiredPorts} отозвано`;
+    $('m-resource').textContent=`${n.metrics.resource.toFixed(1)} / ${n.metrics.resourceCapacity.toFixed(0)}`;
+    $('m-resource-detail').textContent=`Содержание: ${n.metrics.maintenance.toFixed(3)}/тик · поступило: ${n.metrics.lastIntake.toFixed(3)}`;
+    $('m-atrophy').textContent=String(n.metrics.atrophyEvents);
+    $('m-atrophy-detail').textContent=`${n.metrics.dormantNeurons} спящих · голод: ${n.metrics.starvationTicks} тиков`;
     $('m-memory').textContent=n.metrics.stableConnections.toLocaleString('ru-RU');
     $('m-memory-strength').textContent=`${(n.metrics.meanConsolidation||0).toFixed(3)} средняя · ${n.metrics.memoryReactivations||0} эпизодов`;
     updateMemoryGroups(n.memoryGroups||[]);
@@ -135,6 +140,7 @@ async function poll(){
     $('world-temp').textContent=world.ambientTemperature.toFixed(2);
     $('world-visible').textContent=String(world.visibleObjects);
     $('world-collisions').textContent=String(world.collisions);
+    $('world-hazards').textContent=String(world.hazardContacts);
     $('world-goal').textContent=world.course==='sandbox'?'—':world.goalDistance.toFixed(2);
     $('world-best').textContent=world.course==='sandbox'?'—':world.bestGoalDistance.toFixed(2);
     updateWorldSensors(world.sensors||[]);
@@ -158,6 +164,10 @@ function setting(id,key,digits){
   const el=$(id),out=$(id+'-v');el.addEventListener('input',()=>{out.value=Number(el.value).toFixed(digits)});
   el.addEventListener('change',()=>post('/api/control',{[key]:Number(el.value)}));
 }
+setting('resource-supply','resourceSupplyRate',3);
+setting('reinforcement-rate','reinforcementRate',3);
+$('metabolism-enabled').addEventListener('change',e=>post('/api/control',{metabolismEnabled:e.target.checked}));
+$('reinforcement-enabled').addEventListener('change',e=>post('/api/control',{reinforcementEnabled:e.target.checked}));
 setting('target','targetActivity',3);setting('learning','learningRate',4);setting('growth','growthThreshold',3);
 setting('interface-growth','interfaceGrowthThreshold',3);setting('structure-growth','structureGrowthThreshold',3);
 setting('memory-threshold','memoryActivationThreshold',3);
@@ -351,4 +361,25 @@ $('run-spatial-experiment').addEventListener('click', async()=>{
     $('spatial-status').textContent=`Seed ${result.seed} · ${result.episodes} обучающих попыток × ${result.episodeSteps} шагов · ${result.evaluationSteps} шагов проверки`;
   } catch(error){$('spatial-status').textContent=`Ошибка: ${error.message}`;}
   finally {button.disabled=false;}
+});
+
+
+// Bounded outer-loop genetic trial. This does not mutate the live network.
+$('run-genetic-experiment').addEventListener('click', async () => {
+  const button=$('run-genetic-experiment'), status=$('genetic-status'), output=$('genetic-results');
+  button.disabled=true;status.textContent='Выполняется изолированный генетический отбор…';
+  try {
+    const response=await fetch('/api/genetic/experiment',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      seed:1337,population:Number($('genetic-population').value),
+      generations:Number($('genetic-generations').value),stepsPerTrial:Number($('genetic-steps').value),worldTrials:3
+    })});
+    if(!response.ok)throw new Error(`HTTP ${response.status}`);
+    const experiment=await response.json();
+    const lines=experiment.history.map(g=>`Поколение ${g.generation + 1}: максимум ${g.bestFitness.toFixed(3)}, среднее ${g.meanFitness.toFixed(3)}`);
+    lines.push(`Лучший результат: ${experiment.winnerFitness.toFixed(3)} · исходный геном: ${experiment.baselineFitness.toFixed(3)}`);
+    lines.push(`Параметры победителя: ${JSON.stringify(experiment.winner)}`);
+    output.textContent=lines.join(' | ');
+    status.textContent=experiment.interpretation;
+  }catch(error){status.textContent=`Ошибка генетического опыта: ${error.message}`;}
+  finally{button.disabled=false;}
 });
