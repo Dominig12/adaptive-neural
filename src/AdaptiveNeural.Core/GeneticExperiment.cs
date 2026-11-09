@@ -99,7 +99,7 @@ public static class GeneticExperiment
                 net.Step(world.SampleSensors());
                 WorldOutcome result = world.Step(net.ReadMotors());
                 net.Reinforce((result.Food > 0 ? 1f : 0f) -
-                    (result.HazardContact ? 0.08f : 0f) - (result.Collision ? 0.018f : 0f));
+                    (result.HazardContact ? 0.22f : 0f) - (result.Collision ? 0.025f : 0f));
                 net.Feed(world.Energy, result.Food);
             }
             // Distance shaping keeps a flat fitness landscape from overwhelming

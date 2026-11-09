@@ -37,8 +37,8 @@ public sealed class SimulationEngine
         WorldOutcome outcome = _world.Step(_network.ReadMotors());
         // Environmental valence follows the action; it is not a direct motor command.
         float feedback = outcome.Food > 0 ? 1f : 0f;
-        if (outcome.HazardContact) feedback -= 0.08f;
-        if (outcome.Collision) feedback -= 0.018f;
+        if (outcome.HazardContact) feedback -= 0.22f;
+        if (outcome.Collision) feedback -= 0.025f;
         _network.Reinforce(Math.Clamp(feedback, -1f, 1f));
         _network.Feed(_world.Energy, outcome.Food);
     }

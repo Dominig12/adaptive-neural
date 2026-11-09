@@ -258,7 +258,8 @@ public sealed class ForagerWorld
         float right = Math.Clamp(float.IsFinite(motors[1]) ? motors[1] : 0f, 0f, 1f);
         float thrust = Math.Clamp(float.IsFinite(motors[2]) ? motors[2] : 0f, 0f, 1f);
         Heading += ((right - left) * 2.8f + 0.11f * MathF.Sin(_steps * 0.011f)) * dt;
-        float speed = 0.045f + 0.28f * thrust;
+        // No forced forward motion: the agent can stop when motor drive is absent.
+        float speed = 0.45f * thrust;
         float nx = X + MathF.Cos(Heading) * speed * dt;
         float ny = Y + MathF.Sin(Heading) * speed * dt;
         bool blocked = nx < -0.95f || nx > 0.95f || ny < -0.95f || ny > 0.95f;

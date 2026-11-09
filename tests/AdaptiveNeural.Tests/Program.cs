@@ -313,3 +313,10 @@ Check(gaA.History.Length == 2 && gaA.History.SequenceEqual(gaB.History),
 Check(float.IsFinite(gaA.WinnerFitness) && float.IsFinite(gaA.BaselineFitness) &&
       gaA.WinnerFitness >= gaA.BaselineFitness - 0.0001f,
     "elitist selection retains baseline genome and reports finite fitness");
+
+// Purely motor-driven locomotion: zero thrust must not force the agent into hazards.
+var stationary = new ForagerWorld(505, populate: false);
+float beforeX = stationary.X, beforeY = stationary.Y;
+for (int i = 0; i < 30; i++) stationary.Step([0f, 0f, 0f]);
+Check(stationary.X == beforeX && stationary.Y == beforeY,
+    "zero propulsion does not cause involuntary movement");
